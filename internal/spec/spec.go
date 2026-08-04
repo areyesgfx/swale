@@ -7,6 +7,6 @@ package spec
 
 // Spec is the root of a swale.yaml file.
 type Spec struct {
-	Accounts     AccountsSpec
-	Environments []Environment
+	Accounts     AccountsSpec  `yaml:"accounts"`
+	Environments []Environment `yaml:"environments"`
 }
