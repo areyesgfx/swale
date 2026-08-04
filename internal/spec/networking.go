@@ -12,6 +12,6 @@ const (
 // NetworkingSpec holds the VPC/subnet/NAT/security-group/endpoint knobs
 // for a single environment.
 type NetworkingSpec struct {
-	VPCCIDR string
-	NAT     NATMode
+	VPCCIDR string  `yaml:"vpc_cidr"`
+	NAT     NATMode `yaml:"nat"`
 }

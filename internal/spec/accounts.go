@@ -12,12 +12,12 @@ const (
 // Accounts holds exactly one entry. In AccountModeMulti, it holds one
 // workload account per environment plus one management account.
 type AccountsSpec struct {
-	Mode     AccountMode
-	Accounts []Account
+	Mode     AccountMode `yaml:"mode"`
+	Accounts []Account   `yaml:"accounts"`
 }
 
 // Account is an AWS account folder under live/<account>/.
 type Account struct {
-	Name         string
-	IsManagement bool
+	Name         string `yaml:"name"`
+	IsManagement bool   `yaml:"is_management"`
 }
