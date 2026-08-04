@@ -36,6 +36,7 @@ func newInitCmd() *cobra.Command {
 	}
 
 	flags := cmd.Flags()
+	flags.StringVar(&opts.region, "region", "", "AWS region generated infrastructure is deployed into, e.g. us-east-1")
 	flags.StringArrayVar(&opts.envs, "env", nil, "environment name (repeatable), e.g. --env dev --env prod")
 	flags.BoolVar(&opts.singleAccount, "single-account", false, "use a single AWS account shared by every environment")
 	flags.BoolVar(&opts.multiAccount, "multi-account", false, "use one AWS account per environment plus a management account")

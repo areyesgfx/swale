@@ -17,6 +17,7 @@ func TestInitCommandSingleAccount(t *testing.T) {
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 	cmd.SetArgs([]string{
+		"--region", "us-east-1",
 		"--env", "dev",
 		"--single-account",
 		"--vpc-cidr", "dev=10.0.0.0/16",
@@ -31,6 +32,7 @@ func TestInitCommandSingleAccount(t *testing.T) {
 		t.Fatalf("spec.Load: %v", err)
 	}
 	want := spec.Spec{
+		Region: "us-east-1",
 		Accounts: spec.AccountsSpec{
 			Mode:     spec.AccountModeSingle,
 			Accounts: []spec.Account{{Name: "main"}},
@@ -51,6 +53,7 @@ func TestInitCommandMultiAccount(t *testing.T) {
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 	cmd.SetArgs([]string{
+		"--region", "us-east-1",
 		"--env", "dev",
 		"--env", "prod",
 		"--multi-account",
@@ -68,6 +71,7 @@ func TestInitCommandMultiAccount(t *testing.T) {
 		t.Fatalf("spec.Load: %v", err)
 	}
 	want := spec.Spec{
+		Region: "us-east-1",
 		Accounts: spec.AccountsSpec{
 			Mode: spec.AccountModeMulti,
 			Accounts: []spec.Account{
@@ -94,6 +98,7 @@ func TestInitCommandInvalidSpecDoesNotWrite(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetErr(errBuf)
 	cmd.SetArgs([]string{
+		"--region", "us-east-1",
 		"--env", "dev",
 		"--single-account",
 		"--vpc-cidr", "dev=not-a-cidr",
@@ -114,7 +119,7 @@ func TestInitCommandFlagValidationError(t *testing.T) {
 	cmd := newInitCmd()
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"--env", "dev"}) // neither --single-account nor --multi-account
+	cmd.SetArgs([]string{"--region", "us-east-1", "--env", "dev"}) // neither --single-account nor --multi-account
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("Execute: want error, got nil")

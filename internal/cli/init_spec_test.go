@@ -10,6 +10,7 @@ import (
 
 func TestBuildSpecSingleAccount(t *testing.T) {
 	opts := initOptions{
+		region:        "us-east-1",
 		envs:          []string{"dev", "prod"},
 		singleAccount: true,
 		accountName:   "main",
@@ -20,6 +21,7 @@ func TestBuildSpecSingleAccount(t *testing.T) {
 		t.Fatalf("buildSpec: %v", err)
 	}
 	want := spec.Spec{
+		Region: "us-east-1",
 		Accounts: spec.AccountsSpec{
 			Mode:     spec.AccountModeSingle,
 			Accounts: []spec.Account{{Name: "main"}},
@@ -36,6 +38,7 @@ func TestBuildSpecSingleAccount(t *testing.T) {
 
 func TestBuildSpecMultiAccount(t *testing.T) {
 	opts := initOptions{
+		region:            "us-east-1",
 		envs:              []string{"dev", "prod"},
 		multiAccount:      true,
 		managementAccount: "mgmt",
@@ -46,6 +49,7 @@ func TestBuildSpecMultiAccount(t *testing.T) {
 		t.Fatalf("buildSpec: %v", err)
 	}
 	want := spec.Spec{
+		Region: "us-east-1",
 		Accounts: spec.AccountsSpec{
 			Mode: spec.AccountModeMulti,
 			Accounts: []spec.Account{
@@ -66,6 +70,7 @@ func TestBuildSpecMultiAccount(t *testing.T) {
 
 func TestBuildSpecNATOverride(t *testing.T) {
 	opts := initOptions{
+		region:        "us-east-1",
 		envs:          []string{"dev"},
 		singleAccount: true,
 		accountName:   "main",
@@ -84,6 +89,7 @@ func TestBuildSpecNATOverride(t *testing.T) {
 func TestBuildSpecErrors(t *testing.T) {
 	base := func() initOptions {
 		return initOptions{
+			region:        "us-east-1",
 			envs:          []string{"dev"},
 			singleAccount: true,
 			accountName:   "main",
@@ -96,6 +102,7 @@ func TestBuildSpecErrors(t *testing.T) {
 		mutate  func(*initOptions)
 		wantSub string
 	}{
+		{"missing region", func(o *initOptions) { o.region = "" }, "--region is required"},
 		{"neither mode", func(o *initOptions) { o.singleAccount = false }, "exactly one of --single-account or --multi-account"},
 		{"both modes", func(o *initOptions) { o.multiAccount = true }, "exactly one of --single-account or --multi-account"},
 		{"no envs", func(o *initOptions) { o.envs = nil }, "--env is required"},

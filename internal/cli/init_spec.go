@@ -14,6 +14,7 @@ import (
 // carrying its zero/default value), which matters for flags that are only
 // meaningful in one account mode.
 type initOptions struct {
+	region               string
 	envs                 []string
 	singleAccount        bool
 	multiAccount         bool
@@ -29,6 +30,9 @@ type initOptions struct {
 // call spec.Validate itself: Save does that, and duplicating the checks
 // here would just give two places for the rules to drift apart.
 func buildSpec(opts initOptions) (spec.Spec, error) {
+	if opts.region == "" {
+		return spec.Spec{}, errors.New("--region is required")
+	}
 	if opts.singleAccount == opts.multiAccount {
 		return spec.Spec{}, errors.New("specify exactly one of --single-account or --multi-account")
 	}
@@ -81,7 +85,7 @@ func buildSpec(opts initOptions) (spec.Spec, error) {
 		})
 	}
 
-	return spec.Spec{Accounts: accounts, Environments: envs}, nil
+	return spec.Spec{Region: opts.region, Accounts: accounts, Environments: envs}, nil
 }
 
 // buildAccounts derives the account topology and each environment's account
