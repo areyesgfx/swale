@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Third-party actions are pinned to commit SHAs (tags are mutable); the
+# trailing comment records which release each SHA is.
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+      # Includes TestExamplesGolden, which fails if examples/ no longer
+      # matches what swale generates from each examples/*/swale.yaml.
+      - run: go test ./...
+
+  # The go job guarantees examples/ is exactly what swale generates, so
+  # validating the committed examples validates the generated output.
+  examples:
+    runs-on: ubuntu-latest
+    env:
+      SWALE_TERRAGRUNT_VERSION: 1.1.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.3
+          terraform_wrapper: false
+      - name: Install terragrunt
+        run: |
+          base="https://github.com/gruntwork-io/terragrunt/releases/download/v${SWALE_TERRAGRUNT_VERSION}"
+          curl -fsSLo terragrunt_linux_amd64 "$base/terragrunt_linux_amd64"
+          curl -fsSLo SHA256SUMS "$base/SHA256SUMS"
+          grep ' terragrunt_linux_amd64$' SHA256SUMS | sha256sum -c -
+          sudo install -m 0755 terragrunt_linux_amd64 /usr/local/bin/terragrunt
+          rm terragrunt_linux_amd64 SHA256SUMS
+          terragrunt --version
+      - run: ./scripts/validate-examples.sh
