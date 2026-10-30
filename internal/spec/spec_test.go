@@ -14,6 +14,7 @@ import (
 // the validation table tests mutate into invalid variants.
 func validMulti() spec.Spec {
 	return spec.Spec{
+		Region: "us-east-1",
 		Accounts: spec.AccountsSpec{
 			Mode: spec.AccountModeMulti,
 			Accounts: []spec.Account{
@@ -30,6 +31,7 @@ func validMulti() spec.Spec {
 
 func validSingle() spec.Spec {
 	return spec.Spec{
+		Region: "us-east-1",
 		Accounts: spec.AccountsSpec{
 			Mode:     spec.AccountModeSingle,
 			Accounts: []spec.Account{{Name: "main"}},
@@ -68,6 +70,8 @@ func TestValidateInvalid(t *testing.T) {
 		mutate  func(*spec.Spec)
 		wantSub string
 	}{
+		{"empty region", func(s *spec.Spec) { s.Region = "" }, "region: must not be empty"},
+		{"malformed region", func(s *spec.Spec) { s.Region = "not-a-region" }, "does not look like an AWS region"},
 		{"no environments", func(s *spec.Spec) { s.Environments = nil }, "at least one environment"},
 		{"empty env name", func(s *spec.Spec) { s.Environments[0].Name = "" }, "environments[0].name"},
 		{"duplicate env name", func(s *spec.Spec) { s.Environments[1].Name = "dev" }, "duplicate environment name"},

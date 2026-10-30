@@ -7,6 +7,9 @@ package spec
 
 // Spec is the root of a swale.yaml file.
 type Spec struct {
+	// Region is the AWS region generated infrastructure is deployed into.
+	// v1 supports exactly one region per project.
+	Region       string        `yaml:"region"`
 	Accounts     AccountsSpec  `yaml:"accounts"`
 	Environments []Environment `yaml:"environments"`
 }

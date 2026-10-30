@@ -1,0 +1,8 @@
+unit "networking" {
+  source = "../../../units/networking"
+  path   = "networking"
+  values = {
+    vpc_cidr = "{{ .VPCCIDR }}"
+    nat_mode = "{{ .NATMode }}"
+  }
+}

@@ -4,7 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 )
+
+// regionPattern is a format check (e.g. "us-east-1", "us-gov-west-1"), not
+// an exhaustive allow-list - AWS adds regions over time, so validating
+// against a hardcoded list would rot.
+var regionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`)
 
 // Validate reports whether a Spec is internally consistent and safe to
 // generate from. It collects every problem it finds and returns them
@@ -12,6 +18,12 @@ import (
 // than fixing one, re-running, and hitting the next.
 func (s Spec) Validate() error {
 	var errs []error
+
+	if s.Region == "" {
+		errs = append(errs, errors.New("region: must not be empty"))
+	} else if !regionPattern.MatchString(s.Region) {
+		errs = append(errs, fmt.Errorf("region: %q does not look like an AWS region (e.g. \"us-east-1\")", s.Region))
+	}
 
 	errs = append(errs, s.Accounts.validate()...)
 
