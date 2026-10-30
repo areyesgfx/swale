@@ -19,10 +19,8 @@ var regionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`)
 func (s Spec) Validate() error {
 	var errs []error
 
-	if s.Region == "" {
-		errs = append(errs, errors.New("region: must not be empty"))
-	} else if !regionPattern.MatchString(s.Region) {
-		errs = append(errs, fmt.Errorf("region: %q does not look like an AWS region (e.g. \"us-east-1\")", s.Region))
+	if err := CheckRegion(s.Region); err != nil {
+		errs = append(errs, fmt.Errorf("region: %w", err))
 	}
 
 	errs = append(errs, s.Accounts.validate()...)
@@ -119,18 +117,8 @@ func (a AccountsSpec) validate() []error {
 func (n NetworkingSpec) validate(where string) []error {
 	var errs []error
 
-	if n.VPCCIDR == "" {
-		errs = append(errs, fmt.Errorf("%s.networking.vpc_cidr: must not be empty", where))
-	} else {
-		ip, ipNet, err := net.ParseCIDR(n.VPCCIDR)
-		switch {
-		case err != nil:
-			errs = append(errs, fmt.Errorf("%s.networking.vpc_cidr: %q is not valid CIDR notation: %w", where, n.VPCCIDR, err))
-		case ipNet.IP.To4() == nil:
-			errs = append(errs, fmt.Errorf("%s.networking.vpc_cidr: %q must be an IPv4 CIDR", where, n.VPCCIDR))
-		case !ip.Equal(ipNet.IP):
-			errs = append(errs, fmt.Errorf("%s.networking.vpc_cidr: %q has host bits set; use the network address %s", where, n.VPCCIDR, ipNet.String()))
-		}
+	if err := CheckCIDR(n.VPCCIDR); err != nil {
+		errs = append(errs, fmt.Errorf("%s.networking.vpc_cidr: %w", where, err))
 	}
 
 	switch n.NAT {
@@ -142,4 +130,35 @@ func (n NetworkingSpec) validate(where string) []error {
 	}
 
 	return errs
+}
+
+// CheckRegion is the per-field region rule Validate applies, exported so
+// the wizard can reject a bad value as it's typed instead of after the
+// whole form.
+func CheckRegion(region string) error {
+	if region == "" {
+		return errors.New("must not be empty")
+	}
+	if !regionPattern.MatchString(region) {
+		return fmt.Errorf("%q does not look like an AWS region (e.g. \"us-east-1\")", region)
+	}
+	return nil
+}
+
+// CheckCIDR is the per-field VPC CIDR rule Validate applies, exported for
+// the same reason as CheckRegion.
+func CheckCIDR(cidr string) error {
+	if cidr == "" {
+		return errors.New("must not be empty")
+	}
+	ip, ipNet, err := net.ParseCIDR(cidr)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%q is not valid CIDR notation: %w", cidr, err)
+	case ipNet.IP.To4() == nil:
+		return fmt.Errorf("%q must be an IPv4 CIDR", cidr)
+	case !ip.Equal(ipNet.IP):
+		return fmt.Errorf("%q has host bits set; use the network address %s", cidr, ipNet)
+	}
+	return nil
 }
