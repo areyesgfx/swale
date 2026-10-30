@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/iotest"
 
+	"charm.land/huh/v2"
+
 	"github.com/areyesgfx/swale/internal/spec"
 )
 
@@ -196,5 +198,21 @@ func TestCheckEnvList(t *testing.T) {
 		if err := checkEnvList(list); (err != nil) != wantErr {
 			t.Errorf("checkEnvList(%q) error = %v, want error: %v", list, err, wantErr)
 		}
+	}
+}
+
+// TestBackableInput pins the huh v2.0.3 workaround: an invalid input must
+// not block leaving the screen, but must still report its error once it
+// has focus again.
+func TestBackableInput(t *testing.T) {
+	in := &backableInput{Input: huh.NewInput().Validate(notEmpty)}
+	in.Focus()
+	in.Blur()
+	if err := in.Error(); err != nil {
+		t.Errorf("Error() while leaving = %v, want nil", err)
+	}
+	in.Focus()
+	if err := in.Error(); err == nil {
+		t.Error("Error() after refocus = nil, want the validation error")
 	}
 }
