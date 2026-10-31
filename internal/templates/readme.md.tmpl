@@ -27,11 +27,11 @@ Anything running in a private subnet can still reach out to the internet, for ex
 {{- if eq .App.Kind "web" }}
 
 Your app runs in containers on [AWS Fargate](https://aws.amazon.com/fargate/), so there are no servers to manage.
-In each environment, a load balancer in the public subnets takes requests on port 80 and forwards them to your app on port {{ .App.Port }}.
-Your app's containers run in the private subnets and only accept traffic from the load balancer.
+In each environment, [CloudFront](https://aws.amazon.com/cloudfront/) serves your app over HTTPS at an address like `https://d1234abcd.cloudfront.net`, and redirects plain HTTP to HTTPS.
+It passes each request, privately, to a load balancer inside the network, which forwards it to your app on port {{ .App.Port }}.
+Nothing but CloudFront can reach the load balancer, and nothing but the load balancer can reach your app's containers.
+CloudFront doesn't cache anything, so your app sees every request, and it adds standard security headers such as HSTS to every response.
 The load balancer checks `{{ .App.HealthCheckPath }}` on each container, stops sending requests to any that don't answer with a 2xx or 3xx status, and ECS replaces them.
-
-The load balancer serves plain HTTP for now, not HTTPS, so don't send passwords or other secrets to it yet.
 {{- else if eq .App.Kind "worker" }}
 
 Your app runs in containers on [AWS Fargate](https://aws.amazon.com/fargate/), so there are no servers to manage.
@@ -54,10 +54,11 @@ Your app's containers are billed while they run: with the defaults, 0.25 vCPU an
 {{- end }}
 {{- if eq .App.Kind "web" }}
 Each load balancer is about $16 a month in us-east-1, plus a charge that grows with traffic.
+CloudFront's free tier covers 1 TB of traffic and 10 million requests a month across the account; beyond that it charges per GB and per request.
 {{- end }}
 Prices vary by region and change over time, so check [Amazon VPC pricing](https://aws.amazon.com/vpc/pricing/)
 {{- if .App.Kind }}, [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/){{ end }}
-{{- if eq .App.Kind "web" }} and [Elastic Load Balancing pricing](https://aws.amazon.com/elasticloadbalancing/pricing/){{ end }} for `{{ .Region }}`.
+{{- if eq .App.Kind "web" }}, [Elastic Load Balancing pricing](https://aws.amazon.com/elasticloadbalancing/pricing/) and [CloudFront pricing](https://aws.amazon.com/cloudfront/pricing/){{ end }} for `{{ .Region }}`.
 To stop paying for an environment, tear it down (see below).
 
 ## Before you deploy
@@ -85,6 +86,9 @@ terragrunt stack run apply
 `plan` shows what will be created, without changing anything.
 `--backend-bootstrap` makes it first create the S3 bucket that stores Terraform state, `{{ .StateBucket }}`; you only need it the first time.
 `apply` creates everything, after asking you to confirm.
+{{- if eq .App.Kind "web" }}
+The first `apply` in an environment takes 10 to 20 minutes, mostly waiting for CloudFront to deploy worldwide.
+{{- end }}
 {{- if gt (len .Environments) 1 }}
 
 Then do the same for the other environments, in this order:
