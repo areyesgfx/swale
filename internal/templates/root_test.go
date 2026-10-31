@@ -26,7 +26,8 @@ func TestRenderRoot(t *testing.T) {
 		"Account = \"workloads\"",
 		"Environment = \"dev\"",
 		// The literal HCL that strips the stacks materialization segment
-		// from the state key; see FINDINGS.md #2. Verified against a real
+		// from the state key (docs/research/terragrunt-stacks.md, finding 2).
+		// Verified against a real
 		// `terragrunt stack generate` + `terragrunt render` run that this
 		// actually produces "live/dev/hello" from
 		// "live/dev/.terragrunt-stack/hello".
