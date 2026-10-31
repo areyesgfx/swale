@@ -7,3 +7,20 @@ unit "networking" {
     nat_mode = "{{ .NATMode }}"
   }
 }
+{{- with .Service }}
+
+unit "service" {
+  source = "../../units/service"
+  path   = "service"
+  values = {
+    name          = "{{ $.ResourceName }}"
+    image_tag     = "v1"
+    desired_count = {{ .DesiredCount }}
+{{- if .Port }}
+
+    port              = {{ .Port }}
+    health_check_path = "{{ .HealthCheckPath }}"
+{{- end }}
+  }
+}
+{{- end }}

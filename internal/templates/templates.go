@@ -16,12 +16,16 @@ var sources embed.FS
 
 var tmpl = template.Must(template.ParseFS(sources, "*.tmpl"))
 
-// NetworkingUnitHCL is units/networking/terragrunt.hcl. Nothing in it
-// depends on a Spec (its paths are fixed by the live/<env>/ layout), so
-// it's embedded verbatim instead of rendered.
-//
-//go:embed networking_unit.hcl
-var NetworkingUnitHCL string
+// NetworkingUnitHCL and ServiceUnitHCL are units/<name>/terragrunt.hcl.
+// Nothing in them depends on a Spec (their paths are fixed by the
+// live/<env>/ layout), so they're embedded verbatim instead of rendered.
+var (
+	//go:embed networking_unit.hcl
+	NetworkingUnitHCL string
+
+	//go:embed service_unit.hcl
+	ServiceUnitHCL string
+)
 
 // GitIgnore is the generated project's .gitignore. The source file has no
 // leading dot so git doesn't also apply it to this directory.
@@ -42,12 +46,22 @@ type RootData struct {
 // EnvironmentData is the infrastructure swale derived for one environment,
 // e.g. Name "prod" and ResourceName "acme-api-prod". It's the input to
 // live/<env>/terragrunt.stack.hcl, and the README describes each one.
+// Service is nil when the app isn't containerized.
 type EnvironmentData struct {
 	Name         string
 	ResourceName string
 	VPCCIDR      string
 	NATMode      string
 	NATGateways  int
+	Service      *ServiceData
+}
+
+// ServiceData is the containerized app's settings in one environment. Port
+// is 0 for a background worker, which gets no load balancer.
+type ServiceData struct {
+	Port            int
+	HealthCheckPath string
+	DesiredCount    int
 }
 
 // ReadmeData is the input to the generated project's README.md.
@@ -58,6 +72,15 @@ type ReadmeData struct {
 	StateBucket  string
 	Environments []EnvironmentData
 	NATGateways  int
+	App          AppData
+}
+
+// AppData is how the app runs, for the README. Kind is "" when the app
+// isn't containerized, and Port is 0 unless Kind is "web".
+type AppData struct {
+	Kind            string
+	Port            int
+	HealthCheckPath string
 }
 
 func RenderRoot(data RootData) (string, error) {

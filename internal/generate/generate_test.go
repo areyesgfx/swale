@@ -48,6 +48,7 @@ func TestRenderProducesExpectedTree(t *testing.T) {
 		"modules/networking/main.tf",
 		"modules/networking/outputs.tf",
 		"modules/networking/variables.tf",
+		"modules/networking/versions.tf",
 	}
 	for _, p := range want {
 		if _, ok := got[p]; !ok {
@@ -148,13 +149,83 @@ func TestRenderReadmeSingleEnvironment(t *testing.T) {
 	}
 }
 
-func TestRenderNoRemoteModulePinning(t *testing.T) {
-	unit := render(t, sampleSpec())["units/networking/terragrunt.hcl"]
-	if strings.Contains(unit, "ref=") {
-		t.Errorf("units/networking/terragrunt.hcl references a remote module (ref=...), want a local vendored path:\n%s", unit)
+func webSpec() spec.Spec {
+	s := sampleSpec()
+	s.App = spec.App{Containerized: true, Kind: spec.AppKindWeb, Port: 3000, HealthCheckPath: "/health"}
+	return s
+}
+
+func TestRenderContainerizedApp(t *testing.T) {
+	got := render(t, webSpec())
+	for _, p := range []string{"units/service/terragrunt.hcl", "modules/service/main.tf", "modules/service/variables.tf", "modules/service/outputs.tf", "modules/service/versions.tf"} {
+		if _, ok := got[p]; !ok {
+			t.Errorf("missing %q", p)
+		}
 	}
-	if !strings.Contains(unit, "../../../../modules/networking") {
-		t.Errorf("units/networking/terragrunt.hcl does not reference the vendored module by local relative path:\n%s", unit)
+	for path, wants := range map[string][]string{
+		"live/stage/terragrunt.stack.hcl": {`unit "service"`, `name          = "acme-api-stage"`, "desired_count = 1", "port              = 3000", `health_check_path = "/health"`},
+		"live/prod/terragrunt.stack.hcl":  {"desired_count = 2"},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(got[path], want) {
+				t.Errorf("%s missing %q:\n%s", path, want, got[path])
+			}
+		}
+	}
+	for _, want := range []string{"forwards them to your app on port 3000", "checks `/health`", "plain HTTP", "### Shipping your app", "--cluster acme-api-stage --service acme-api-stage", "Your app runs as 2 copies, spread across both zones."} {
+		if !strings.Contains(got["README.md"], want) {
+			t.Errorf("README.md missing %q", want)
+		}
+	}
+}
+
+func TestRenderWorker(t *testing.T) {
+	s := sampleSpec()
+	s.App = spec.App{Containerized: true, Kind: spec.AppKindWorker}
+	got := render(t, s)
+	stack := got["live/prod/terragrunt.stack.hcl"]
+	if !strings.Contains(stack, `unit "service"`) {
+		t.Errorf("worker stack has no service unit:\n%s", stack)
+	}
+	if strings.Contains(stack, "port") {
+		t.Errorf("worker stack sets a port:\n%s", stack)
+	}
+	readme := got["README.md"]
+	for _, want := range []string{"background worker", "### Shipping your app"} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing %q", want)
+		}
+	}
+	if strings.Contains(readme, "load balancer serves") {
+		t.Error("worker README talks about a load balancer")
+	}
+}
+
+func TestRenderWithoutContainerOmitsService(t *testing.T) {
+	got := render(t, sampleSpec())
+	for p := range got {
+		if strings.Contains(p, "service") {
+			t.Errorf("rendered %q for an app that isn't containerized", p)
+		}
+	}
+	if strings.Contains(got["live/prod/terragrunt.stack.hcl"], "service") {
+		t.Error("stack mentions a service for an app that isn't containerized")
+	}
+	if !strings.Contains(got["README.md"], "## Adding your app later") {
+		t.Error("README.md doesn't explain how to add the app later")
+	}
+}
+
+func TestRenderNoRemoteModulePinning(t *testing.T) {
+	got := render(t, webSpec())
+	for _, name := range []string{"networking", "service"} {
+		path := "units/" + name + "/terragrunt.hcl"
+		if strings.Contains(got[path], "ref=") {
+			t.Errorf("%s references a remote module (ref=...), want a local vendored path:\n%s", path, got[path])
+		}
+		if !strings.Contains(got[path], "../../../../modules/"+name) {
+			t.Errorf("%s does not reference the vendored module by local relative path:\n%s", path, got[path])
+		}
 	}
 }
 

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Checks that every generated project under examples/ is formatted and
-# passes `terraform validate` through Terragrunt. CI runs this; run it
+# Checks that every generated project under examples/ is formatted, that
+# each unit's inputs match its module's variables, and that it passes
+# `terraform validate` through Terragrunt. CI runs this; run it
 # locally the same way: ./scripts/validate-examples.sh
 #
 # It never touches AWS: credentials are scrubbed from the environment and
 # Terraform is initialized with -backend=false, so the S3 state backend in
-# root.hcl is never contacted (and its bucket is never auto-created).
+# root.hcl is never contacted (and its bucket is never auto-created). The
+# mock_dependencies feature makes units read their dependencies' outputs
+# from mock_outputs, since there's no state to read them from.
 # Each example is validated in a temp copy so Terragrunt's build artifacts
 # (.terragrunt-stack/, .terragrunt-cache/) never land in examples/, where
 # they would fail the golden-file test.
@@ -42,8 +45,12 @@ for example in "${examples[@]}"; do
     (
       cd "$stack"
       terragrunt stack generate
-      terragrunt run --all -- init -backend=false -input=false
-      terragrunt run --all --no-auto-init -- validate
+      # terraform validate doesn't check what Terragrunt passes in, so this
+      # catches a unit passing an input its module doesn't declare, or
+      # missing one it requires.
+      terragrunt hcl validate --inputs --strict --all --feature mock_dependencies=true
+      terragrunt run --all --feature mock_dependencies=true -- init -backend=false -input=false
+      terragrunt run --all --feature mock_dependencies=true --no-auto-init -- validate
     )
   done
 done

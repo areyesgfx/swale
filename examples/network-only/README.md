@@ -63,6 +63,13 @@ To change the infrastructure, edit the files under `live/`, `units/` and `module
 To add an environment, add it to `environments` in `swale.yaml` (swale knows `dev`, `stage` and `prod`) and run `swale generate`.
 It creates the new environment's files and leaves every existing file alone.
 
+## Adding your app later
+
+swale can run your app once it's containerized, meaning it has a Dockerfile.
+When it is, set `containerized: true` under `app` in `swale.yaml`, along with `kind` (`web` or `worker`) and, for a web app, `port` and `health_check_path`.
+Then delete each `live/<environment>/terragrunt.stack.hcl`, after copying out any changes you made, and run `swale generate`.
+swale never overwrites an existing file, so deleting them is how you let it write the new versions.
+
 ## Tearing an environment down
 
 ```sh
