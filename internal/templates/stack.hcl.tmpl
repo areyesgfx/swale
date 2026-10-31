@@ -7,6 +7,21 @@ unit "networking" {
     nat_mode = "{{ .NATMode }}"
   }
 }
+{{- with .Database }}
+
+unit "database" {
+  source = "../../units/database"
+  path   = "database"
+  values = {
+    name                  = "{{ $.ResourceName }}"
+    instance_class        = "{{ .InstanceClass }}"
+    highly_available      = {{ .HighlyAvailable }}
+    deletion_protection   = {{ .DeletionProtection }}
+    backup_retention_days = {{ .BackupRetentionDays }}
+    password_version      = 1
+  }
+}
+{{- end }}
 {{- with .Service }}
 
 unit "service" {

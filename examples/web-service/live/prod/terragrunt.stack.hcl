@@ -8,6 +8,19 @@ unit "networking" {
   }
 }
 
+unit "database" {
+  source = "../../units/database"
+  path   = "database"
+  values = {
+    name                  = "acme-api-prod"
+    instance_class        = "db.t4g.small"
+    highly_available      = true
+    deletion_protection   = true
+    backup_retention_days = 14
+    password_version      = 1
+  }
+}
+
 unit "service" {
   source = "../../units/service"
   path   = "service"

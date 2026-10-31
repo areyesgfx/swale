@@ -27,6 +27,20 @@ dependency "networking" {
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
 
+dependency "database" {
+  config_path  = "../database"
+  skip_outputs = feature.mock_dependencies.value
+
+  mock_outputs = {
+    address           = "mock.database.internal"
+    port              = 5432
+    name              = "mock"
+    secret_arn        = "arn:aws:secretsmanager:us-east-1:000000000000:secret:mock"
+    security_group_id = "sg-00000000000000000"
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
 inputs = {
   name               = values.name
   vpc_id             = dependency.networking.outputs.vpc_id
@@ -35,4 +49,5 @@ inputs = {
   desired_count      = values.desired_count
   port               = try(values.port, null)
   health_check_path  = try(values.health_check_path, "/")
+  database           = dependency.database.outputs
 }

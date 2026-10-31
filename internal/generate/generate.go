@@ -34,19 +34,27 @@ type File struct {
 // Every environment has its own fixed address range, rather than one
 // assigned by its position in swale.yaml, so adding or removing an
 // environment never shifts another's, and ranges never overlap in case the
-// networks are ever connected. Only prod pays for a NAT gateway per
-// availability zone, and for a second copy of the app so it survives one
-// zone failing.
+// networks are ever connected. Only prod pays to survive an availability
+// zone failing: a NAT gateway per zone, a second copy of the app, and a
+// standby database. It also keeps backups longer and protects its database
+// from being deleted.
 type profile struct {
-	vpcCIDR string
-	natMode string
-	tasks   int
+	vpcCIDR  string
+	natMode  string
+	tasks    int
+	database templates.DatabaseData
 }
 
 var profiles = map[string]profile{
-	"dev":   {vpcCIDR: "10.10.0.0/16", natMode: "single", tasks: 1},
-	"stage": {vpcCIDR: "10.20.0.0/16", natMode: "single", tasks: 1},
-	"prod":  {vpcCIDR: "10.30.0.0/16", natMode: "per_az", tasks: 2},
+	"dev": {vpcCIDR: "10.10.0.0/16", natMode: "single", tasks: 1, database: templates.DatabaseData{
+		InstanceClass: "db.t4g.micro", BackupRetentionDays: 7,
+	}},
+	"stage": {vpcCIDR: "10.20.0.0/16", natMode: "single", tasks: 1, database: templates.DatabaseData{
+		InstanceClass: "db.t4g.micro", BackupRetentionDays: 7,
+	}},
+	"prod": {vpcCIDR: "10.30.0.0/16", natMode: "per_az", tasks: 2, database: templates.DatabaseData{
+		InstanceClass: "db.t4g.small", HighlyAvailable: true, DeletionProtection: true, BackupRetentionDays: 14,
+	}},
 }
 
 // azCount matches the networking module's az_count default.
@@ -79,6 +87,10 @@ func Render(s spec.Spec) ([]File, error) {
 				DesiredCount:    p.tasks,
 			}
 		}
+		if s.App.Database != "" {
+			db := p.database
+			env.Database = &db
+		}
 		natGateways += env.NATGateways
 		envs = append(envs, env)
 	}
@@ -101,6 +113,7 @@ func Render(s spec.Spec) ([]File, error) {
 			Kind:            string(s.App.Kind),
 			Port:            s.App.Port,
 			HealthCheckPath: s.App.HealthCheckPath,
+			Database:        string(s.App.Database),
 		},
 	})
 	if err != nil {
@@ -112,8 +125,15 @@ func Render(s spec.Spec) ([]File, error) {
 		{Path: "root.hcl", Content: root},
 	}
 	files = append(files, unit("networking", templates.NetworkingUnitHCL)...)
+	if s.App.Database != "" {
+		files = append(files, unit("database", templates.DatabaseUnitHCL)...)
+	}
 	if s.App.Containerized {
-		files = append(files, unit("service", templates.ServiceUnitHCL)...)
+		service, err := templates.RenderServiceUnit(templates.ServiceUnitData{Database: s.App.Database != ""})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, unit("service", service)...)
 	}
 
 	for _, env := range envs {
@@ -129,6 +149,13 @@ func Render(s spec.Spec) ([]File, error) {
 		return nil, err
 	}
 	files = append(files, networking...)
+	if s.App.Database != "" {
+		database, err := vendorModule(modules.Database, "database")
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, database...)
+	}
 	if s.App.Containerized {
 		service, err := vendorModule(modules.Service, "service")
 		if err != nil {
