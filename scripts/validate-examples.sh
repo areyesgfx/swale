@@ -49,7 +49,9 @@ for example in "${examples[@]}"; do
       # catches a unit passing an input its module doesn't declare, or
       # missing one it requires.
       terragrunt hcl validate --inputs --strict --all --feature mock_dependencies=true
-      terragrunt run --all --feature mock_dependencies=true -- init -backend=false -input=false
+      # -lockfile=readonly fails if a unit's lock file is missing a provider
+      # its module needs, instead of quietly resolving a new version.
+      terragrunt run --all --feature mock_dependencies=true -- init -backend=false -input=false -lockfile=readonly
       terragrunt run --all --feature mock_dependencies=true --no-auto-init -- validate
     )
   done
