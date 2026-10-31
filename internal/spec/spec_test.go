@@ -28,6 +28,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	for name, app := range map[string]spec.App{
 		"not containerized": {},
 		"web":               webApp(),
+		"web with database": {Containerized: true, Kind: spec.AppKindWeb, Database: spec.DatabasePostgres, Port: 8080, HealthCheckPath: "/"},
 		"worker":            {Containerized: true, Kind: spec.AppKindWorker},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -147,6 +148,8 @@ func TestValidateInvalid(t *testing.T) {
 		{"state bucket with dots", func(s *spec.Spec) { s.StateBucket = "acme.tfstate" }, "lowercase letters, numbers and dashes"},
 		{"state bucket too long", func(s *spec.Spec) { s.StateBucket = strings.Repeat("a", 64) }, "3 to 63 characters"},
 		{"kind without container", func(s *spec.Spec) { s.App.Kind = spec.AppKindWeb }, "only apply when containerized is true"},
+		{"database without container", func(s *spec.Spec) { s.App.Database = spec.DatabasePostgres }, "only apply when containerized is true"},
+		{"unknown database", func(s *spec.Spec) { s.App = webApp(); s.App.Database = "mysql" }, `app.database: "mysql" is not supported`},
 		{"containerized without kind", func(s *spec.Spec) { s.App = spec.App{Containerized: true} }, "app.kind: must not be empty"},
 		{"unknown kind", func(s *spec.Spec) { s.App = spec.App{Containerized: true, Kind: "cron"} }, `"cron" is not a valid kind`},
 		{"web without port", func(s *spec.Spec) { s.App = webApp(); s.App.Port = 0 }, "app.port: 0 is not a port number"},

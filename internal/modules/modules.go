@@ -18,3 +18,9 @@ var Networking embed.FS
 //
 //go:embed service
 var Service embed.FS
+
+// Database holds the database module's source, rooted at "database". It
+// runs PostgreSQL on RDS.
+//
+//go:embed database
+var Database embed.FS

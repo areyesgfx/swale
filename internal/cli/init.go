@@ -23,6 +23,7 @@ type initAnswers struct {
 	environments    int
 	containerized   bool
 	kind            string
+	database        string
 	port            int
 	healthCheckPath string
 }
@@ -45,6 +46,9 @@ func (a initAnswers) toSpec(random io.Reader) (spec.Spec, error) {
 	s := spec.Spec{Name: a.name, Region: a.region, Environments: envs, StateBucket: bucket}
 	if a.containerized {
 		s.App = spec.App{Containerized: true, Kind: spec.AppKind(a.kind)}
+		if a.database != noDatabase {
+			s.App.Database = spec.Database(a.database)
+		}
 		if s.App.Kind == spec.AppKindWeb {
 			s.App.Port = a.port
 			s.App.HealthCheckPath = a.healthCheckPath
@@ -52,6 +56,10 @@ func (a initAnswers) toSpec(random io.Reader) (spec.Spec, error) {
 	}
 	return s, nil
 }
+
+// noDatabase is how both front doors say the app needs no database; the
+// spec leaves app.database out instead.
+const noDatabase = "none"
 
 // newInitCmd builds "swale init". random supplies the state bucket name's
 // suffix: crypto/rand.Reader, or a fixed reader in tests.
@@ -91,7 +99,7 @@ take their defaults.`,
 			} else if a.name == "" {
 				return errors.New("--name is required, since the directory name isn't a valid app name")
 			} else if !a.containerized {
-				for _, flag := range []string{"kind", "port", "health-check-path"} {
+				for _, flag := range []string{"kind", "database", "port", "health-check-path"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--%s only applies to a containerized app, so it can't be combined with --containerized=false", flag)
 					}
@@ -136,6 +144,7 @@ take their defaults.`,
 	flags.IntVar(&a.environments, "environments", 2, "how many environments: 1 (prod), 2 (stage, prod) or 3 (dev, stage, prod)")
 	flags.BoolVar(&a.containerized, "containerized", true, "the app runs in a container (has a Dockerfile); false sets up only the network")
 	flags.StringVar(&a.kind, "kind", string(spec.AppKindWeb), `what the app does: "web" (serves requests behind a load balancer) or "worker" (runs in the background)`)
+	flags.StringVar(&a.database, "database", noDatabase, `database the app needs: "none" or "postgres"`)
 	flags.IntVar(&a.port, "port", 8080, "port a web app listens on")
 	flags.StringVar(&a.healthCheckPath, "health-check-path", "/", "path that answers with a 2xx or 3xx status when a web app is healthy")
 

@@ -96,10 +96,19 @@ data "aws_iam_policy_document" "execution" {
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.this.arn}:*"]
   }
+
+  dynamic "statement" {
+    for_each = var.database == null ? [] : [var.database.secret_arn]
+    content {
+      sid       = "ReadDatabaseCredentials"
+      actions   = ["secretsmanager:GetSecretValue"]
+      resources = [statement.value]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "execution" {
-  name   = "pull-image-and-write-logs"
+  name   = "start-app"
   role   = aws_iam_role.execution.id
   policy = data.aws_iam_policy_document.execution.json
 }
@@ -136,6 +145,17 @@ resource "aws_ecs_task_definition" "this" {
     image        = "${aws_ecr_repository.this.repository_url}:${var.image_tag}"
     essential    = true
     portMappings = local.web ? [{ containerPort = var.port, protocol = "tcp" }] : []
+    environment = var.database == null ? [] : [
+      { name = "DB_HOST", value = var.database.address },
+      { name = "DB_PORT", value = tostring(var.database.port) },
+      { name = "DB_NAME", value = var.database.name },
+    ]
+    # ECS reads these from the secret when it starts a container, so the
+    # password never appears in the task definition.
+    secrets = var.database == null ? [] : [
+      { name = "DB_USERNAME", valueFrom = "${var.database.secret_arn}:username::" },
+      { name = "DB_PASSWORD", valueFrom = "${var.database.secret_arn}:password::" },
+    ]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -175,6 +195,17 @@ resource "aws_vpc_security_group_ingress_rule" "service_from_lb" {
   ip_protocol                  = "tcp"
   from_port                    = var.port
   to_port                      = var.port
+}
+
+resource "aws_vpc_security_group_ingress_rule" "database_from_service" {
+  count = var.database == null ? 0 : 1
+
+  security_group_id            = var.database.security_group_id
+  description                  = "Database connections from the app's containers."
+  referenced_security_group_id = aws_security_group.service.id
+  ip_protocol                  = "tcp"
+  from_port                    = var.database.port
+  to_port                      = var.database.port
 }
 
 resource "aws_security_group" "lb" {

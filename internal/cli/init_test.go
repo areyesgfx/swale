@@ -102,6 +102,7 @@ func TestInitFlagsApp(t *testing.T) {
 	}{
 		{"web", []string{"--port", "3000", "--health-check-path", "/healthz"}, spec.App{Containerized: true, Kind: spec.AppKindWeb, Port: 3000, HealthCheckPath: "/healthz"}},
 		{"worker ignores web defaults", []string{"--kind", "worker"}, spec.App{Containerized: true, Kind: spec.AppKindWorker}},
+		{"worker with database", []string{"--kind", "worker", "--database", "postgres"}, spec.App{Containerized: true, Kind: spec.AppKindWorker, Database: spec.DatabasePostgres}},
 		{"not containerized", []string{"--containerized=false"}, spec.App{}},
 	}
 	for _, tt := range tests {
@@ -153,6 +154,8 @@ func TestInitFlagErrors(t *testing.T) {
 		{"unknown kind", []string{"--name", "acme", "--kind", "cron"}, `"cron" is not a valid kind`},
 		{"invalid port", []string{"--name", "acme", "--port", "0"}, "app.port: 0 is not a port number"},
 		{"port without container", []string{"--name", "acme", "--containerized=false", "--port", "80"}, "--port only applies to a containerized app"},
+		{"database without container", []string{"--name", "acme", "--containerized=false", "--database", "postgres"}, "--database only applies to a containerized app"},
+		{"unknown database", []string{"--name", "acme", "--database", "mysql"}, `app.database: "mysql" is not supported`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -189,12 +192,13 @@ func TestInitRequiresNameWhenDirNameIsInvalid(t *testing.T) {
 // Accessible mode doesn't offer pre-filled values as defaults, so every
 // answer is typed.
 func TestWizardForms(t *testing.T) {
-	a := initAnswers{region: "us-east-1", environments: 2, containerized: true, kind: "web", port: 8080, healthCheckPath: "/"}
+	a := initAnswers{region: "us-east-1", environments: 2, containerized: true, kind: "web", database: noDatabase, port: 8080, healthCheckPath: "/"}
 	answer(t, initForm(&a), "shop-web\n"+ // name
 		"6\n"+ // region: Europe (Ireland)
 		"1\n"+ // environments: prod only
 		"1\n") // containerized: yes
-	answer(t, kindForm(&a), "1\n")   // web
+	answer(t, appForm(&a), "1\n"+ // web
+		"2\n") // database: PostgreSQL
 	answer(t, webForm(&a), "3000\n"+ // port
 		"/healthz\n") // health check path
 
@@ -206,7 +210,7 @@ func TestWizardForms(t *testing.T) {
 		Name:         "shop-web",
 		Region:       "eu-west-1",
 		Environments: []string{"prod"},
-		App:          spec.App{Containerized: true, Kind: spec.AppKindWeb, Port: 3000, HealthCheckPath: "/healthz"},
+		App:          spec.App{Containerized: true, Kind: spec.AppKindWeb, Database: spec.DatabasePostgres, Port: 3000, HealthCheckPath: "/healthz"},
 		StateBucket:  "shop-web-tfstate-0a1b2c3d",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -220,7 +224,7 @@ func TestWizardSkipsQuestionsThatDoNotApply(t *testing.T) {
 		t.Error("webForm asked a worker for its port")
 	}
 	none := initAnswers{containerized: false, kind: "web"}
-	if kindForm(&none) != nil || webForm(&none) != nil {
+	if appForm(&none) != nil || webForm(&none) != nil {
 		t.Error("an app that isn't containerized was asked what it does")
 	}
 }

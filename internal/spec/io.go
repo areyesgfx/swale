@@ -20,7 +20,8 @@ already exists, so to apply a change to one, delete it first.`
 
 	appComment = `How your app runs. A containerized app (one with a Dockerfile) runs on
 AWS Fargate: kind "web" serves requests on port behind a load balancer that
-checks health_check_path, and kind "worker" runs in the background.`
+checks health_check_path, and kind "worker" runs in the background. Set
+database to "postgres" to give it a PostgreSQL database.`
 
 	stateBucketComment = `The S3 bucket that stores Terraform state. It was picked when the project
 was created; the random suffix keeps it from colliding with anyone else's,

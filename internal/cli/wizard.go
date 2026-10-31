@@ -41,7 +41,7 @@ func runWizard(defaults initAnswers) (initAnswers, error) {
 		return initAnswers{}, errors.New("stdin is not a terminal, so the interactive questions can't run; pass flags instead (see swale init --help)")
 	}
 	a := defaults
-	for _, form := range []func(*initAnswers) *huh.Form{initForm, kindForm, webForm} {
+	for _, form := range []func(*initAnswers) *huh.Form{initForm, appForm, webForm} {
 		if f := form(&a); f != nil {
 			if err := f.Run(); err != nil {
 				return initAnswers{}, err
@@ -90,9 +90,9 @@ func initForm(a *initAnswers) *huh.Form {
 	)
 }
 
-// kindForm asks what a containerized app does, or returns nil if the app
-// isn't containerized.
-func kindForm(a *initAnswers) *huh.Form {
+// appForm asks what a containerized app does and whether it needs a
+// database, or returns nil if the app isn't containerized.
+func appForm(a *initAnswers) *huh.Form {
 	if !a.containerized {
 		return nil
 	}
@@ -104,6 +104,14 @@ func kindForm(a *initAnswers) *huh.Form {
 				huh.NewOption("Works in the background, for example processing jobs from a queue", string(spec.AppKindWorker)),
 			).
 			Value(&a.kind),
+		huh.NewSelect[string]().
+			Title("Does your app need a database?").
+			Description("swale can set up PostgreSQL, run and backed up by AWS, that only your app can reach.").
+			Options(
+				huh.NewOption("No", noDatabase),
+				huh.NewOption("Yes, PostgreSQL", string(spec.DatabasePostgres)),
+			).
+			Value(&a.database),
 	)
 }
 
