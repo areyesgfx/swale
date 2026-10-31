@@ -1,3 +1,8 @@
+variable "name" {
+  type        = string
+  description = "Prefix for the network's resource names, shown in the AWS console as their Name tag, e.g. \"acme-api-prod\"."
+}
+
 variable "vpc_cidr" {
   type        = string
   description = "CIDR block for the VPC. Subnets are carved out of this in equal /20-or-smaller chunks (16 possible chunks), so a /16 or smaller-prefix (larger) source CIDR gives the most usable subnet sizes."

@@ -76,14 +76,13 @@ func printResult(w io.Writer, r generate.Result) {
 }
 
 func printNextSteps(w io.Writer, dir string, s spec.Spec) {
-	env := s.Environments[0].Name
-	stack := filepath.Join(dir, filepath.FromSlash(generate.StackDir(s, env)))
+	env := s.Environments[0]
 	fmt.Fprintf(w, `
-Next steps:
+Next steps (%s explains each one):
   1. Sign in to AWS in this shell, for example with "aws sso login" or by setting AWS_PROFILE.
   2. Deploy the %s environment:
        cd %s
-       terragrunt stack run apply --backend-bootstrap
-     --backend-bootstrap creates the S3 bucket that stores Terraform state. It's only needed the first time.
-`, env, stack)
+       terragrunt stack run plan --backend-bootstrap
+       terragrunt stack run apply
+`, filepath.Join(dir, "README.md"), env, filepath.Join(dir, filepath.FromSlash(generate.StackDir(env))))
 }

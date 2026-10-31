@@ -17,8 +17,8 @@ var sources embed.FS
 var tmpl = template.Must(template.ParseFS(sources, "*.tmpl"))
 
 // NetworkingUnitHCL is units/networking/terragrunt.hcl. Nothing in it
-// depends on a Spec (its paths are fixed by the live/<account>/<env>/
-// layout), so it's embedded verbatim instead of rendered.
+// depends on a Spec (its paths are fixed by the live/<env>/ layout), so
+// it's embedded verbatim instead of rendered.
 //
 //go:embed networking_unit.hcl
 var NetworkingUnitHCL string
@@ -39,18 +39,37 @@ type RootData struct {
 	Tags        map[string]string
 }
 
-// NetworkingStackData is the input to live/<account>/<env>/terragrunt.stack.hcl.
-type NetworkingStackData struct {
-	VPCCIDR string
-	NATMode string
+// EnvironmentData is the infrastructure swale derived for one environment,
+// e.g. Name "prod" and ResourceName "acme-api-prod". It's the input to
+// live/<env>/terragrunt.stack.hcl, and the README describes each one.
+type EnvironmentData struct {
+	Name         string
+	ResourceName string
+	VPCCIDR      string
+	NATMode      string
+	NATGateways  int
+}
+
+// ReadmeData is the input to the generated project's README.md.
+// Environments are in the order the user listed them.
+type ReadmeData struct {
+	Name         string
+	Region       string
+	StateBucket  string
+	Environments []EnvironmentData
+	NATGateways  int
 }
 
 func RenderRoot(data RootData) (string, error) {
 	return render("root.hcl.tmpl", data)
 }
 
-func RenderNetworkingStack(data NetworkingStackData) (string, error) {
-	return render("networking_stack.hcl.tmpl", data)
+func RenderStack(data EnvironmentData) (string, error) {
+	return render("stack.hcl.tmpl", data)
+}
+
+func RenderReadme(data ReadmeData) (string, error) {
+	return render("readme.md.tmpl", data)
 }
 
 func render(name string, data any) (string, error) {

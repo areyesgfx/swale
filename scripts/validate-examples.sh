@@ -37,7 +37,7 @@ for example in "${examples[@]}"; do
   terragrunt hcl format --check
   terraform fmt -check -recursive modules
 
-  for stack in live/*/*/; do
+  for stack in live/*/; do
     echo "--> $name/$stack"
     (
       cd "$stack"
