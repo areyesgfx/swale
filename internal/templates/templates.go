@@ -1,6 +1,7 @@
 // Package templates holds the text/template sources swale renders into
-// generated Terragrunt/Terraform projects (ADR 0001: text/template, not
-// hclwrite, so generated files stay plain, readable, and hand-editable).
+// generated Terragrunt/Terraform projects. It uses text/template rather
+// than hclwrite so generated files stay plain, readable, and hand-editable;
+// the trade-off is that swale can render HCL but never parse it.
 package templates
 
 import (
@@ -28,9 +29,9 @@ var NetworkingUnitHCL string
 //go:embed gitignore
 var GitIgnore string
 
-// RootData is the input to root.hcl. Terragrunt creates StateBucket on
-// first use (ADR 0004), so it need not exist yet. Region applies to both
-// the state backend and the provider block. Tags are merged into
+// RootData is the input to root.hcl. Terragrunt creates StateBucket when
+// run with --backend-bootstrap, so it need not exist yet. Region applies to
+// both the state backend and the provider block. Tags are merged into
 // default_tags alongside the always-present ManagedBy=swale tag.
 type RootData struct {
 	StateBucket string

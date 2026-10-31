@@ -1,6 +1,6 @@
 # Terragrunt stacks findings
 
-These findings come from `stacks-lab/`, a throwaway prototype built for SWA-5 to answer questions about Terragrunt stacks materialization before the real `root.hcl` template ([ADR 0005](../adr/0005-terragrunt-stacks.md)) was written.
+These findings come from `stacks-lab/`, a throwaway prototype built for SWA-5 to answer questions about Terragrunt stacks materialization before the real `root.hcl` template was written.
 The prototype was removed in SWA-15 once the real template in `internal/templates/` and the CI-validated output in `examples/` replaced it.
 Its source is still in git history at commit `2259857`.
 
@@ -57,7 +57,7 @@ That's the natural home for per-env overrides in the stacks model; a project-wid
 
 They're wiped.
 Appended a comment line directly to `.terragrunt-stack/hello/terragrunt.hcl`, re-ran `terragrunt stack generate`, and the file was fully regenerated from the source unit - the manual edit was gone.
-Confirms `.terragrunt-stack/` is a disposable build artifact, matching ADR 0005's call to gitignore it.
+Confirms `.terragrunt-stack/` is a disposable build artifact, which is why generated projects gitignore it.
 
 ## 5. Which Terragrunt version, and how will generated projects pin it?
 

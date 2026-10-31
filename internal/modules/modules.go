@@ -1,6 +1,8 @@
 // Package modules embeds the vendored Terraform module source that
-// internal/generate copies into every generated project's modules/ dir,
-// per ADR 0002 (vendored into the project, no central module repo).
+// internal/generate copies into every generated project's modules/ dir.
+// Vendoring means a project never depends on a separate, versioned module
+// repo; the trade-off is that swale can't push module fixes into projects
+// it has already generated.
 package modules
 
 import "embed"
