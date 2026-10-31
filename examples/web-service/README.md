@@ -104,6 +104,17 @@ It creates the new environment's files and leaves every existing file alone.
 Your app starts with no permissions to use other AWS services.
 To let it use one, such as S3 or SQS, add an `aws_iam_role_policy` for `aws_iam_role.task` in `modules/service/main.tf`.
 
+## Upgrading providers
+
+Each `units/<name>/.terraform.lock.hcl` pins the exact Terraform provider builds, so every run on every machine uses the same ones.
+Terraform never updates these files by itself.
+To upgrade, regenerate one from its module, check that `plan` shows no surprises, and commit it:
+
+```sh
+terraform -chdir=modules/networking providers lock -platform=darwin_arm64 -platform=darwin_amd64 -platform=linux_amd64 -platform=linux_arm64 -platform=windows_amd64
+mv modules/networking/.terraform.lock.hcl units/networking/
+```
+
 ## Tearing an environment down
 
 ```sh
