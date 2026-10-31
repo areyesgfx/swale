@@ -3,6 +3,7 @@ package generate
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,72 +24,83 @@ func sampleSpec() spec.Spec {
 	}
 }
 
-func TestGenerateProducesExpectedTree(t *testing.T) {
-	out := t.TempDir()
-	if err := Generate(sampleSpec(), out); err != nil {
-		t.Fatalf("Generate: %v", err)
+// render calls Render on s and returns its files keyed by path.
+func render(t *testing.T, s spec.Spec) map[string]string {
+	t.Helper()
+	files, err := Render(s)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
 	}
+	byPath := make(map[string]string, len(files))
+	for _, f := range files {
+		if _, dup := byPath[f.Path]; dup {
+			t.Errorf("Render returned %q twice", f.Path)
+		}
+		byPath[f.Path] = f.Content
+	}
+	return byPath
+}
 
-	wantFiles := []string{
+func TestRenderProducesExpectedTree(t *testing.T) {
+	got := render(t, sampleSpec())
+	want := []string{
+		".gitignore",
 		"root.hcl",
 		"units/networking/terragrunt.hcl",
 		"live/main/dev/terragrunt.stack.hcl",
 		"live/main/prod/terragrunt.stack.hcl",
 		"modules/networking/main.tf",
-		"modules/networking/variables.tf",
 		"modules/networking/outputs.tf",
+		"modules/networking/variables.tf",
 	}
-	for _, rel := range wantFiles {
-		if _, err := os.Stat(filepath.Join(out, rel)); err != nil {
-			t.Errorf("expected file %q: %v", rel, err)
+	for _, p := range want {
+		if _, ok := got[p]; !ok {
+			t.Errorf("missing %q", p)
 		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("Render returned %d files, want %d", len(got), len(want))
 	}
 }
 
-func TestGenerateRootHCLContent(t *testing.T) {
-	out := t.TempDir()
-	if err := Generate(sampleSpec(), out); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	content, err := os.ReadFile(filepath.Join(out, "root.hcl"))
+func TestRenderIsDeterministic(t *testing.T) {
+	first, err := Render(sampleSpec())
 	if err != nil {
 		t.Fatal(err)
 	}
+	second, err := Render(sampleSpec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Error("two Render calls on the same spec returned different files")
+	}
+}
+
+func TestRenderRootHCLContent(t *testing.T) {
+	root := render(t, sampleSpec())["root.hcl"]
 	for _, want := range []string{`bucket  = "swale-main-tfstate"`, `region  = "us-east-1"`} {
-		if !strings.Contains(string(content), want) {
-			t.Errorf("root.hcl missing %q:\n%s", want, content)
+		if !strings.Contains(root, want) {
+			t.Errorf("root.hcl missing %q:\n%s", want, root)
 		}
 	}
 }
 
-func TestGenerateStackContentPerEnv(t *testing.T) {
-	out := t.TempDir()
-	if err := Generate(sampleSpec(), out); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	dev, err := os.ReadFile(filepath.Join(out, "live/main/dev/terragrunt.stack.hcl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`vpc_cidr = "10.0.0.0/16"`, `nat_mode = "single"`} {
-		if !strings.Contains(string(dev), want) {
-			t.Errorf("dev stack missing %q:\n%s", want, dev)
-		}
-	}
-
-	prod, err := os.ReadFile(filepath.Join(out, "live/main/prod/terragrunt.stack.hcl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`vpc_cidr = "10.1.0.0/16"`, `nat_mode = "per_az"`} {
-		if !strings.Contains(string(prod), want) {
-			t.Errorf("prod stack missing %q:\n%s", want, prod)
+func TestRenderStackContentPerEnv(t *testing.T) {
+	got := render(t, sampleSpec())
+	for path, wants := range map[string][]string{
+		"live/main/dev/terragrunt.stack.hcl":  {`vpc_cidr = "10.0.0.0/16"`, `nat_mode = "single"`},
+		"live/main/prod/terragrunt.stack.hcl": {`vpc_cidr = "10.1.0.0/16"`, `nat_mode = "per_az"`},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(got[path], want) {
+				t.Errorf("%s missing %q:\n%s", path, want, got[path])
+			}
 		}
 	}
 }
 
-func TestGenerateRejectsMultiAccount(t *testing.T) {
+func TestRenderRejectsMultiAccount(t *testing.T) {
 	s := sampleSpec()
 	s.Accounts = spec.AccountsSpec{
 		Mode: spec.AccountModeMulti,
@@ -97,42 +109,74 @@ func TestGenerateRejectsMultiAccount(t *testing.T) {
 			{Name: "dev"},
 		},
 	}
-	err := Generate(s, t.TempDir())
+	_, err := Render(s)
 	if err == nil {
-		t.Fatal("Generate: want error for multi-account spec, got nil")
+		t.Fatal("Render: want error for multi-account spec, got nil")
 	}
 	if !strings.Contains(err.Error(), "single-account") {
-		t.Errorf("Generate error = %q, want it to mention single-account", err.Error())
+		t.Errorf("Render error = %q, want it to mention single-account", err.Error())
 	}
 }
 
-func TestGenerateRefusesToOverwrite(t *testing.T) {
-	out := t.TempDir()
-	if err := Generate(sampleSpec(), out); err != nil {
-		t.Fatalf("first Generate: %v", err)
+func TestRenderNoRemoteModulePinning(t *testing.T) {
+	unit := render(t, sampleSpec())["units/networking/terragrunt.hcl"]
+	if strings.Contains(unit, "ref=") {
+		t.Errorf("units/networking/terragrunt.hcl references a remote module (ref=...), want a local vendored path:\n%s", unit)
 	}
-	err := Generate(sampleSpec(), out)
-	if err == nil {
-		t.Fatal("second Generate: want error for pre-existing output, got nil")
-	}
-	if !strings.Contains(err.Error(), "already exists") {
-		t.Errorf("second Generate error = %q, want it to mention the file already existing", err.Error())
+	if !strings.Contains(unit, "../../../../../modules/networking") {
+		t.Errorf("units/networking/terragrunt.hcl does not reference the vendored module by local relative path:\n%s", unit)
 	}
 }
 
-func TestGenerateNoRemoteModulePinning(t *testing.T) {
-	out := t.TempDir()
-	if err := Generate(sampleSpec(), out); err != nil {
-		t.Fatalf("Generate: %v", err)
+func TestWriteCreatesFiles(t *testing.T) {
+	dir := t.TempDir()
+	files := []File{{Path: "a.txt", Content: "a"}, {Path: "nested/b.txt", Content: "b"}}
+
+	r, err := Write(dir, files)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
 	}
-	content, err := os.ReadFile(filepath.Join(out, "units/networking/terragrunt.hcl"))
+	if want := (Result{Created: []string{"a.txt", "nested/b.txt"}}); !reflect.DeepEqual(r, want) {
+		t.Errorf("Write result = %+v, want %+v", r, want)
+	}
+	for _, f := range files {
+		got, err := os.ReadFile(filepath.Join(dir, f.Path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != f.Content {
+			t.Errorf("%s = %q, want %q", f.Path, got, f.Content)
+		}
+	}
+}
+
+func TestWriteNeverOverwrites(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Write(dir, []File{{Path: "same.txt", Content: "same"}, {Path: "edited.txt", Content: "original"}}); err != nil {
+		t.Fatal(err)
+	}
+	edited := filepath.Join(dir, "edited.txt")
+	if err := os.WriteFile(edited, []byte("the user's edit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Write(dir, []File{
+		{Path: "same.txt", Content: "same"},
+		{Path: "edited.txt", Content: "original"},
+		{Path: "new.txt", Content: "new"},
+	})
+	if err != nil {
+		t.Fatalf("second Write: %v", err)
+	}
+	want := Result{Created: []string{"new.txt"}, Unchanged: []string{"same.txt"}, Kept: []string{"edited.txt"}}
+	if !reflect.DeepEqual(r, want) {
+		t.Errorf("second Write result = %+v, want %+v", r, want)
+	}
+	got, err := os.ReadFile(edited)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(content), "ref=") {
-		t.Errorf("units/networking/terragrunt.hcl references a remote module (ref=...), want a local vendored path:\n%s", content)
-	}
-	if !strings.Contains(string(content), "../../../../../modules/networking") {
-		t.Errorf("units/networking/terragrunt.hcl does not reference the vendored module by local relative path:\n%s", content)
+	if string(got) != "the user's edit" {
+		t.Errorf("edited.txt = %q, want the user's edit kept", got)
 	}
 }

@@ -3,10 +3,14 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/areyesgfx/swale/internal/generate"
 	"github.com/areyesgfx/swale/internal/spec"
 )
 
@@ -58,29 +62,33 @@ func (a initAnswers) toSpec() spec.Spec {
 }
 
 func newInitCmd() *cobra.Command {
-	var (
-		f      initFlags
-		output string
-	)
+	var f initFlags
 
 	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Create a new swale.yaml spec",
-		Long: `Create a new swale.yaml spec.
+		Use:   "init [dir]",
+		Short: "Create a new swale project",
+		Long: `Create a new swale project in dir (default: the current directory): a
+swale.yaml spec, and the Terragrunt/Terraform project generated from it.
 
-Run with no flags (other than --output) to fill in an interactive form.
-Pass flags instead to run non-interactively, e.g. in scripts or CI.`,
+Run with no flags to fill in an interactive form. Pass flags instead to run
+non-interactively, e.g. in scripts or CI.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			specFlags := cmd.Flags().NFlag()
-			if cmd.Flags().Changed("output") {
-				specFlags--
+			dir := projectDir(args)
+			specPath := filepath.Join(dir, spec.FileName)
+			// Checked before asking anything, so nobody fills in the whole
+			// form only to be told the project already exists.
+			if _, err := os.Stat(specPath); err == nil {
+				return fmt.Errorf("%s already exists; edit it and run \"swale generate\", or delete it to start over", specPath)
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return err
 			}
 
 			var (
 				a   initAnswers
 				err error
 			)
-			if specFlags == 0 {
+			if cmd.Flags().NFlag() == 0 {
 				a, err = runWizard()
 			} else {
 				a, err = f.answers()
@@ -89,10 +97,31 @@ Pass flags instead to run non-interactively, e.g. in scripts or CI.`,
 				return err
 			}
 
-			if err := spec.Save(a.toSpec(), output); err != nil {
+			// Render before writing anything, so a spec swale can't generate
+			// leaves no half-created project behind.
+			s := a.toSpec()
+			if err := s.Validate(); err != nil {
 				return err
 			}
-			cmd.Printf("wrote %s\n", output)
+			files, err := generate.Render(s)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			if err := spec.Save(s, specPath); err != nil {
+				return err
+			}
+			r, err := generate.Write(dir, files)
+			if err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Created %s and generated your project:\n", specPath)
+			printResult(out, r)
+			printNextSteps(out, dir, s)
 			return nil
 		},
 	}
@@ -106,7 +135,6 @@ Pass flags instead to run non-interactively, e.g. in scripts or CI.`,
 	flags.StringVar(&f.managementAccount, "management-account", "", "management account name, required in --multi-account mode")
 	flags.StringArrayVar(&f.vpcCIDRs, "vpc-cidr", nil, "VPC CIDR for an environment, as env=cidr (repeatable, required for every --env)")
 	flags.StringArrayVar(&f.natModes, "nat", nil, `NAT mode for an environment, as env=single|per_az (repeatable, optional; defaults to per_az for "prod", single otherwise)`)
-	flags.StringVarP(&output, "output", "o", "swale.yaml", "path to write the spec")
 
 	cmd.MarkFlagsMutuallyExclusive("single-account", "multi-account")
 	cmd.MarkFlagsMutuallyExclusive("single-account", "management-account")

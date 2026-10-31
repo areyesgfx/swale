@@ -7,6 +7,9 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// FileName is the name of the spec file at the root of every swale project.
+const FileName = "swale.yaml"
+
 // Load reads and decodes a swale.yaml file from path, then validates it.
 // Unknown fields are rejected so a typo in a key surfaces as an error
 // rather than being silently dropped.

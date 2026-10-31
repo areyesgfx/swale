@@ -14,7 +14,7 @@ infrastructure without hand-writing HCL from scratch.`,
 		SilenceUsage: true,
 	}
 
-	root.AddCommand(newInitCmd())
+	root.AddCommand(newInitCmd(), newGenerateCmd())
 
 	return root
 }
