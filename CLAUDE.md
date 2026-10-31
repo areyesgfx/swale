@@ -5,8 +5,8 @@ This file provides guidance to Claude Code when working in this repository on th
 ## Project
 
 `swale` is a Go CLI (Cobra) — infrastructure/platform tooling, evidenced by the
-`iac-mentor-review` skill already in `.claude/skills/` and the `stacks-lab` Terragrunt stacks
-prototype. Treat this as IaC/platform code: per the owner's standing global instructions, that
+`iac-mentor-review` skill already in `.claude/skills/` and the Terragrunt stacks templates in
+`internal/templates/` (the research behind them is in `docs/research/terragrunt-stacks.md`). Treat this as IaC/platform code: per the owner's standing global instructions, that
 means favoring quality, simplicity, robustness, and long-term maintainability over speed of
 implementation, being picky about drift and blast radius, and reproducing bugs for real before
 proposing fixes rather than reasoning from reading code alone. This is a firmer bar than app
