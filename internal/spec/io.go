@@ -18,6 +18,10 @@ const (
 create any files that are missing. swale never overwrites a file that
 already exists, so to apply a change to one, delete it first.`
 
+	appComment = `How your app runs. A containerized app (one with a Dockerfile) runs on
+AWS Fargate: kind "web" serves requests on port behind a load balancer that
+checks health_check_path, and kind "worker" runs in the background.`
+
 	stateBucketComment = `The S3 bucket that stores Terraform state. It was picked when the project
 was created; the random suffix keeps it from colliding with anyone else's,
 since bucket names are global. Don't change it once you've deployed.`
@@ -62,7 +66,10 @@ func Save(spec Spec, path string) error {
 	}
 	doc.HeadComment = fileComment
 	for i := 0; i < len(doc.Content); i += 2 {
-		if doc.Content[i].Value == "state_bucket" {
+		switch doc.Content[i].Value {
+		case "app":
+			doc.Content[i].HeadComment = appComment
+		case "state_bucket":
 			doc.Content[i].HeadComment = stateBucketComment
 		}
 	}

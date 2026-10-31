@@ -12,3 +12,9 @@ import "embed"
 //
 //go:embed networking
 var Networking embed.FS
+
+// Service holds the service module's source, rooted at "service". It runs
+// a containerized app on ECS Fargate.
+//
+//go:embed service
+var Service embed.FS

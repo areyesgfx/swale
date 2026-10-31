@@ -35,16 +35,18 @@ type File struct {
 // assigned by its position in swale.yaml, so adding or removing an
 // environment never shifts another's, and ranges never overlap in case the
 // networks are ever connected. Only prod pays for a NAT gateway per
-// availability zone.
+// availability zone, and for a second copy of the app so it survives one
+// zone failing.
 type profile struct {
 	vpcCIDR string
 	natMode string
+	tasks   int
 }
 
 var profiles = map[string]profile{
-	"dev":   {vpcCIDR: "10.10.0.0/16", natMode: "single"},
-	"stage": {vpcCIDR: "10.20.0.0/16", natMode: "single"},
-	"prod":  {vpcCIDR: "10.30.0.0/16", natMode: "per_az"},
+	"dev":   {vpcCIDR: "10.10.0.0/16", natMode: "single", tasks: 1},
+	"stage": {vpcCIDR: "10.20.0.0/16", natMode: "single", tasks: 1},
+	"prod":  {vpcCIDR: "10.30.0.0/16", natMode: "per_az", tasks: 2},
 }
 
 // azCount matches the networking module's az_count default.
@@ -70,6 +72,13 @@ func Render(s spec.Spec) ([]File, error) {
 		if p.natMode == "per_az" {
 			env.NATGateways = azCount
 		}
+		if s.App.Containerized {
+			env.Service = &templates.ServiceData{
+				Port:            s.App.Port,
+				HealthCheckPath: s.App.HealthCheckPath,
+				DesiredCount:    p.tasks,
+			}
+		}
 		natGateways += env.NATGateways
 		envs = append(envs, env)
 	}
@@ -88,6 +97,11 @@ func Render(s spec.Spec) ([]File, error) {
 		StateBucket:  s.StateBucket,
 		Environments: envs,
 		NATGateways:  natGateways,
+		App: templates.AppData{
+			Kind:            string(s.App.Kind),
+			Port:            s.App.Port,
+			HealthCheckPath: s.App.HealthCheckPath,
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -97,6 +111,9 @@ func Render(s spec.Spec) ([]File, error) {
 		{Path: "README.md", Content: readme},
 		{Path: "root.hcl", Content: root},
 		{Path: "units/networking/terragrunt.hcl", Content: templates.NetworkingUnitHCL},
+	}
+	if s.App.Containerized {
+		files = append(files, File{Path: "units/service/terragrunt.hcl", Content: templates.ServiceUnitHCL})
 	}
 
 	for _, env := range envs {
@@ -111,7 +128,15 @@ func Render(s spec.Spec) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(files, networking...), nil
+	files = append(files, networking...)
+	if s.App.Containerized {
+		service, err := vendorModule(modules.Service, "service")
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, service...)
+	}
+	return files, nil
 }
 
 // StackDir is the slash-separated directory, relative to the project root,

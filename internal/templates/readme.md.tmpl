@@ -17,10 +17,31 @@ Each environment is a separate copy of the infrastructure, so you can try a chan
 {{- else }}
   Both zones share one NAT gateway, which costs less, but if that gateway's zone goes down, the whole network loses internet access.
 {{- end }}
+{{- with .Service }}
+  Your app runs as {{ .DesiredCount }} cop{{ if eq .DesiredCount 1 }}y{{ else }}ies, spread across both zones{{ end }}.
+{{- end }}
 {{- end }}
 
 Each network has public subnets, which the internet can reach, and private subnets, which it can't.
 Anything running in a private subnet can still reach out to the internet, for example to call an API, through a NAT gateway.
+{{- if eq .App.Kind "web" }}
+
+Your app runs in containers on [AWS Fargate](https://aws.amazon.com/fargate/), so there are no servers to manage.
+In each environment, a load balancer in the public subnets takes requests on port 80 and forwards them to your app on port {{ .App.Port }}.
+Your app's containers run in the private subnets and only accept traffic from the load balancer.
+The load balancer checks `{{ .App.HealthCheckPath }}` on each container, stops sending requests to any that don't answer with a 2xx or 3xx status, and ECS replaces them.
+
+The load balancer serves plain HTTP for now, not HTTPS, so don't send passwords or other secrets to it yet.
+{{- else if eq .App.Kind "worker" }}
+
+Your app runs in containers on [AWS Fargate](https://aws.amazon.com/fargate/), so there are no servers to manage.
+It runs as a background worker in the private subnets: nothing on the internet can reach it, but it can reach out, for example to read from a queue or call an API.
+If a container stops, ECS starts a new one.
+{{- end }}
+{{- if .App.Kind }}
+
+Each environment has its own container registry (Amazon ECR) for your app's images, and keeps your app's logs in CloudWatch Logs for 30 days.
+{{- end }}
 
 ## What it costs
 
@@ -28,7 +49,15 @@ Most of the network is free, but NAT gateways aren't.
 This project has {{ .NATGateways }} NAT gateway{{ if ne .NATGateways 1 }}s{{ end }} in total.
 AWS bills each one by the hour, plus a charge for every GB of traffic it handles and a small hourly charge for its public IP address.
 In us-east-1 a NAT gateway is about $0.045 an hour, or around $33 a month before traffic.
-Prices vary by region and change over time, so check [Amazon VPC pricing](https://aws.amazon.com/vpc/pricing/) for `{{ .Region }}`.
+{{- if .App.Kind }}
+Your app's containers are billed while they run: with the defaults, 0.25 vCPU and 0.5 GB of memory each, that's about $9 a month per copy in us-east-1.
+{{- end }}
+{{- if eq .App.Kind "web" }}
+Each load balancer is about $16 a month in us-east-1, plus a charge that grows with traffic.
+{{- end }}
+Prices vary by region and change over time, so check [Amazon VPC pricing](https://aws.amazon.com/vpc/pricing/)
+{{- if .App.Kind }}, [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/){{ end }}
+{{- if eq .App.Kind "web" }} and [Elastic Load Balancing pricing](https://aws.amazon.com/elasticloadbalancing/pricing/){{ end }} for `{{ .Region }}`.
 To stop paying for an environment, tear it down (see below).
 
 ## Before you deploy
@@ -63,6 +92,38 @@ Then do the same for the other environments, in this order:
 - `live/{{ .Name }}`
 {{- end }}
 {{- end }}
+{{- if .App.Kind }}
+
+### Shipping your app
+
+The first `apply` creates an empty container registry, so your app can't start until you push an image to it.
+Find the registry's address in the output of:
+
+```sh
+terragrunt stack output
+```
+
+It's the `service` unit's `repository_url`{{ if eq .App.Kind "web" }}, and its `url` is where your app will be reachable{{ end }}.
+Then, from your app's directory (the one with the Dockerfile), build your image, push it as version `v1`, and tell ECS to start it:
+
+```sh
+REPO=<repository_url>
+aws ecr get-login-password --region {{ .Region }} | docker login --username AWS --password-stdin "${REPO%%/*}"
+docker build --platform linux/amd64 -t "$REPO:v1" .
+docker push "$REPO:v1"
+aws ecs update-service --region {{ .Region }} --cluster {{ $first.ResourceName }} --service {{ $first.ResourceName }} --force-new-deployment
+```
+
+`--platform linux/amd64` matters on Apple silicon Macs, which otherwise build images that Fargate can't run.
+{{- if gt (len .Environments) 1 }}
+Do the same for each environment, with its own `repository_url`, and its own cluster and service name, `{{ .Name }}-<environment>`.
+{{- end }}
+
+To ship a new version, push it under a new tag, such as `v2` or your git commit hash.
+A tag can only be pushed once, so it always means the same image.
+Then set `image_tag` to the new tag in `live/<environment>/terragrunt.stack.hcl` and run `terragrunt stack run apply` there.
+To roll back, set `image_tag` back to the previous tag and apply again.
+{{- end }}
 
 ## Making changes
 
@@ -70,6 +131,19 @@ To change the infrastructure, edit the files under `live/`, `units/` and `module
 
 To add an environment, add it to `environments` in `swale.yaml` (swale knows `dev`, `stage` and `prod`) and run `swale generate`.
 It creates the new environment's files and leaves every existing file alone.
+{{- if .App.Kind }}
+
+Your app starts with no permissions to use other AWS services.
+To let it use one, such as S3 or SQS, add an `aws_iam_role_policy` for `aws_iam_role.task` in `modules/service/main.tf`.
+{{- else }}
+
+## Adding your app later
+
+swale can run your app once it's containerized, meaning it has a Dockerfile.
+When it is, set `containerized: true` under `app` in `swale.yaml`, along with `kind` (`web` or `worker`) and, for a web app, `port` and `health_check_path`.
+Then delete each `live/<environment>/terragrunt.stack.hcl`, after copying out any changes you made, and run `swale generate`.
+swale never overwrites an existing file, so deleting them is how you let it write the new versions.
+{{- end }}
 
 ## Tearing an environment down
 

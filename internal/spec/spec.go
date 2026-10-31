@@ -22,8 +22,28 @@ type Spec struct {
 	Name         string   `yaml:"name"`
 	Region       string   `yaml:"region"`
 	Environments []string `yaml:"environments"`
+	App          App      `yaml:"app"`
 	StateBucket  string   `yaml:"state_bucket"`
 }
+
+// App is how the app runs. Containerized apps run on ECS Fargate; an app
+// that isn't containerized gets only the network, and leaves the other
+// fields empty. Port and HealthCheckPath apply only to AppKindWeb.
+type App struct {
+	Containerized   bool    `yaml:"containerized"`
+	Kind            AppKind `yaml:"kind,omitempty"`
+	Port            int     `yaml:"port,omitempty"`
+	HealthCheckPath string  `yaml:"health_check_path,omitempty"`
+}
+
+// AppKind is what a containerized app does: serve web requests behind a
+// load balancer, or work in the background with nothing able to reach it.
+type AppKind string
+
+const (
+	AppKindWeb    AppKind = "web"
+	AppKindWorker AppKind = "worker"
+)
 
 // KnownEnvironments lists every environment swale knows how to build,
 // from least to most critical.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -32,13 +33,20 @@ var regions = []struct{ place, code string }{
 
 // runWizard is the interactive "swale init" front door. defaults holds the
 // pre-filled answers, so pressing enter on every question is a sane setup.
+// It runs up to three forms because later questions depend on earlier
+// answers; hiding groups instead would break huh's accessible (screen
+// reader) mode, which ignores hidden groups and asks everything.
 func runWizard(defaults initAnswers) (initAnswers, error) {
 	if !term.IsTerminal(os.Stdin.Fd()) {
 		return initAnswers{}, errors.New("stdin is not a terminal, so the interactive questions can't run; pass flags instead (see swale init --help)")
 	}
 	a := defaults
-	if err := initForm(&a).Run(); err != nil {
-		return initAnswers{}, err
+	for _, form := range []func(*initAnswers) *huh.Form{initForm, kindForm, webForm} {
+		if f := form(&a); f != nil {
+			if err := f.Run(); err != nil {
+				return initAnswers{}, err
+			}
+		}
 	}
 	return a, nil
 }
@@ -71,6 +79,61 @@ func initForm(a *initAnswers) *huh.Form {
 			Description("Each one is a separate copy of your infrastructure. prod keeps running if a data center fails; the others use a cheaper setup.").
 			Options(envOptions...).
 			Value(&a.environments),
+		huh.NewSelect[bool]().
+			Title("Does your app run in a container?").
+			Description("Pick yes if it has a Dockerfile. swale runs containers on AWS Fargate, so there are no servers to manage.").
+			Options(
+				huh.NewOption("Yes, it has a Dockerfile", true),
+				huh.NewOption("Not yet: just set up the network for now", false),
+			).
+			Value(&a.containerized),
+	)
+}
+
+// kindForm asks what a containerized app does, or returns nil if the app
+// isn't containerized.
+func kindForm(a *initAnswers) *huh.Form {
+	if !a.containerized {
+		return nil
+	}
+	return oneQuestionPerScreen(
+		huh.NewSelect[string]().
+			Title("What does your app do?").
+			Options(
+				huh.NewOption("Handles web requests: it's a website or an API", string(spec.AppKindWeb)),
+				huh.NewOption("Works in the background, for example processing jobs from a queue", string(spec.AppKindWorker)),
+			).
+			Value(&a.kind),
+	)
+}
+
+// webForm asks how the load balancer reaches a web app, or returns nil if
+// the app isn't one. The port is typed as text, so its validator also
+// stores the parsed number in a.port: the last value validated is the one
+// submitted.
+func webForm(a *initAnswers) *huh.Form {
+	if !a.containerized || a.kind != string(spec.AppKindWeb) {
+		return nil
+	}
+	port := strconv.Itoa(a.port)
+	return oneQuestionPerScreen(
+		huh.NewInput().
+			Title("Which port does your app listen on?").
+			Description("The port your container serves requests on, like 3000 or 8080.").
+			Value(&port).
+			Validate(func(s string) error {
+				n, err := strconv.Atoi(s)
+				if err != nil {
+					return fmt.Errorf("%q is not a number", s)
+				}
+				a.port = n
+				return spec.CheckPort(n)
+			}),
+		huh.NewInput().
+			Title("Which path shows your app is healthy?").
+			Description("The load balancer requests it to check each container. It should answer with a 2xx or 3xx status once the app is ready, like /health. If you don't have one, / usually works.").
+			Value(&a.healthCheckPath).
+			Validate(spec.CheckHealthCheckPath),
 	)
 }
 

@@ -1,0 +1,20 @@
+# swale.yaml describes your app. After editing it, run "swale generate" to
+# create any files that are missing. swale never overwrites a file that
+# already exists, so to apply a change to one, delete it first.
+name: acme-api
+region: us-east-1
+environments:
+  - stage
+  - prod
+# How your app runs. A containerized app (one with a Dockerfile) runs on
+# AWS Fargate: kind "web" serves requests on port behind a load balancer that
+# checks health_check_path, and kind "worker" runs in the background.
+app:
+  containerized: true
+  kind: web
+  port: 8080
+  health_check_path: /health
+# The S3 bucket that stores Terraform state. It was picked when the project
+# was created; the random suffix keeps it from colliding with anyone else's,
+# since bucket names are global. Don't change it once you've deployed.
+state_bucket: acme-api-tfstate-0a1b2c3d

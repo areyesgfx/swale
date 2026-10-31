@@ -20,18 +20,48 @@ func valid() spec.Spec {
 	}
 }
 
+func webApp() spec.App {
+	return spec.App{Containerized: true, Kind: spec.AppKindWeb, Port: 8080, HealthCheckPath: "/health"}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
-	want := valid()
+	for name, app := range map[string]spec.App{
+		"not containerized": {},
+		"web":               webApp(),
+		"worker":            {Containerized: true, Kind: spec.AppKindWorker},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want := valid()
+			want.App = app
+			path := filepath.Join(t.TempDir(), spec.FileName)
+			if err := spec.Save(want, path); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			got, err := spec.Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("round-trip mismatch:\n got: %#v\nwant: %#v", got, want)
+			}
+		})
+	}
+}
+
+// TestLoadWithoutApp keeps swale.yaml files written before the app
+// section existed loadable: a missing app means not containerized.
+func TestLoadWithoutApp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), spec.FileName)
-	if err := spec.Save(want, path); err != nil {
-		t.Fatalf("Save: %v", err)
+	body := "name: acme-api\nregion: us-east-1\nenvironments: [prod]\nstate_bucket: acme-api-tfstate-0a1b2c3d\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	got, err := spec.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("round-trip mismatch:\n got: %#v\nwant: %#v", got, want)
+	if got.App != (spec.App{}) {
+		t.Errorf("app = %#v, want the zero value", got.App)
 	}
 }
 
@@ -116,6 +146,15 @@ func TestValidateInvalid(t *testing.T) {
 		{"empty state bucket", func(s *spec.Spec) { s.StateBucket = "" }, "state_bucket: must not be empty"},
 		{"state bucket with dots", func(s *spec.Spec) { s.StateBucket = "acme.tfstate" }, "lowercase letters, numbers and dashes"},
 		{"state bucket too long", func(s *spec.Spec) { s.StateBucket = strings.Repeat("a", 64) }, "3 to 63 characters"},
+		{"kind without container", func(s *spec.Spec) { s.App.Kind = spec.AppKindWeb }, "only apply when containerized is true"},
+		{"containerized without kind", func(s *spec.Spec) { s.App = spec.App{Containerized: true} }, "app.kind: must not be empty"},
+		{"unknown kind", func(s *spec.Spec) { s.App = spec.App{Containerized: true, Kind: "cron"} }, `"cron" is not a valid kind`},
+		{"web without port", func(s *spec.Spec) { s.App = webApp(); s.App.Port = 0 }, "app.port: 0 is not a port number"},
+		{"web port too high", func(s *spec.Spec) { s.App = webApp(); s.App.Port = 70000 }, "app.port: 70000"},
+		{"health check without slash", func(s *spec.Spec) { s.App = webApp(); s.App.HealthCheckPath = "health" }, "app.health_check_path"},
+		{"health check with interpolation", func(s *spec.Spec) { s.App = webApp(); s.App.HealthCheckPath = "/${evil}" }, "app.health_check_path"},
+		{"health check with quote", func(s *spec.Spec) { s.App = webApp(); s.App.HealthCheckPath = `/a"b` }, "app.health_check_path"},
+		{"worker with port", func(s *spec.Spec) { s.App = spec.App{Containerized: true, Kind: spec.AppKindWorker, Port: 80} }, "only apply to web apps"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

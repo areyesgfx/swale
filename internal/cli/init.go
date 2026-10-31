@@ -18,9 +18,13 @@ import (
 // scripts and CI) and the interactive wizard. Each front door only fills
 // this in; toSpec and spec.Validate own the rules, so the two can't drift.
 type initAnswers struct {
-	name         string
-	region       string
-	environments int
+	name            string
+	region          string
+	environments    int
+	containerized   bool
+	kind            string
+	port            int
+	healthCheckPath string
 }
 
 // toSpec builds the Spec without validating it, except for the name: the
@@ -38,7 +42,15 @@ func (a initAnswers) toSpec(random io.Reader) (spec.Spec, error) {
 	if err != nil {
 		return spec.Spec{}, err
 	}
-	return spec.Spec{Name: a.name, Region: a.region, Environments: envs, StateBucket: bucket}, nil
+	s := spec.Spec{Name: a.name, Region: a.region, Environments: envs, StateBucket: bucket}
+	if a.containerized {
+		s.App = spec.App{Containerized: true, Kind: spec.AppKind(a.kind)}
+		if s.App.Kind == spec.AppKindWeb {
+			s.App.Port = a.port
+			s.App.HealthCheckPath = a.healthCheckPath
+		}
+	}
+	return s, nil
 }
 
 // newInitCmd builds "swale init". random supplies the state bucket name's
@@ -78,6 +90,12 @@ take their defaults.`,
 				}
 			} else if a.name == "" {
 				return errors.New("--name is required, since the directory name isn't a valid app name")
+			} else if !a.containerized {
+				for _, flag := range []string{"kind", "port", "health-check-path"} {
+					if cmd.Flags().Changed(flag) {
+						return fmt.Errorf("--%s only applies to a containerized app, so it can't be combined with --containerized=false", flag)
+					}
+				}
 			}
 
 			// Render before writing anything, so a spec swale can't generate
@@ -116,6 +134,10 @@ take their defaults.`,
 	flags.StringVar(&a.name, "name", "", "app name, used to name its AWS resources (default: the directory name)")
 	flags.StringVar(&a.region, "region", "us-east-1", "AWS region to run in")
 	flags.IntVar(&a.environments, "environments", 2, "how many environments: 1 (prod), 2 (stage, prod) or 3 (dev, stage, prod)")
+	flags.BoolVar(&a.containerized, "containerized", true, "the app runs in a container (has a Dockerfile); false sets up only the network")
+	flags.StringVar(&a.kind, "kind", string(spec.AppKindWeb), `what the app does: "web" (serves requests behind a load balancer) or "worker" (runs in the background)`)
+	flags.IntVar(&a.port, "port", 8080, "port a web app listens on")
+	flags.StringVar(&a.healthCheckPath, "health-check-path", "/", "path that answers with a 2xx or 3xx status when a web app is healthy")
 
 	return cmd
 }

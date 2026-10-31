@@ -1,0 +1,40 @@
+include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+terraform {
+  source = "${get_terragrunt_dir()}/../../../../modules/service"
+}
+
+# Pass --feature mock_dependencies=true to validate without AWS
+# credentials, e.g. in CI: the network's outputs then come from
+# mock_outputs instead of its state.
+feature "mock_dependencies" {
+  default = false
+}
+
+dependency "networking" {
+  config_path  = "../networking"
+  skip_outputs = feature.mock_dependencies.value
+
+  # Placeholders so validate and plan work before the network exists, for
+  # example on an environment's first plan. apply always waits for the
+  # network and uses its real outputs.
+  mock_outputs = {
+    vpc_id             = "vpc-00000000000000000"
+    public_subnet_ids  = ["subnet-00000000000000000", "subnet-00000000000000001"]
+    private_subnet_ids = ["subnet-00000000000000002", "subnet-00000000000000003"]
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
+inputs = {
+  name               = values.name
+  vpc_id             = dependency.networking.outputs.vpc_id
+  public_subnet_ids  = dependency.networking.outputs.public_subnet_ids
+  private_subnet_ids = dependency.networking.outputs.private_subnet_ids
+  image_tag          = values.image_tag
+  desired_count      = values.desired_count
+  port               = try(values.port, null)
+  health_check_path  = try(values.health_check_path, "/")
+}

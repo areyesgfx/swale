@@ -85,4 +85,7 @@ Next steps (%s explains each one):
        terragrunt stack run plan --backend-bootstrap
        terragrunt stack run apply
 `, filepath.Join(dir, "README.md"), env, filepath.Join(dir, filepath.FromSlash(generate.StackDir(env))))
+	if s.App.Containerized {
+		fmt.Fprintln(w, `  3. Push your app's image, as "Shipping your app" in the README shows.`)
+	}
 }
