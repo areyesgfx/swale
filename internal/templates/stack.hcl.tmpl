@@ -1,7 +1,8 @@
 unit "networking" {
-  source = "../../../units/networking"
+  source = "../../units/networking"
   path   = "networking"
   values = {
+    name     = "{{ .ResourceName }}"
     vpc_cidr = "{{ .VPCCIDR }}"
     nat_mode = "{{ .NATMode }}"
   }

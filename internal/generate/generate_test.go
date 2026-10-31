@@ -12,15 +12,10 @@ import (
 
 func sampleSpec() spec.Spec {
 	return spec.Spec{
-		Region: "us-east-1",
-		Accounts: spec.AccountsSpec{
-			Mode:     spec.AccountModeSingle,
-			Accounts: []spec.Account{{Name: "main"}},
-		},
-		Environments: []spec.Environment{
-			{Name: "dev", Account: "main", Networking: spec.NetworkingSpec{VPCCIDR: "10.0.0.0/16", NAT: spec.NATModeSingle}},
-			{Name: "prod", Account: "main", Networking: spec.NetworkingSpec{VPCCIDR: "10.1.0.0/16", NAT: spec.NATModePerAZ}},
-		},
+		Name:         "acme-api",
+		Region:       "us-east-1",
+		Environments: []string{"stage", "prod"},
+		StateBucket:  "acme-api-tfstate-0a1b2c3d",
 	}
 }
 
@@ -45,10 +40,11 @@ func TestRenderProducesExpectedTree(t *testing.T) {
 	got := render(t, sampleSpec())
 	want := []string{
 		".gitignore",
+		"README.md",
 		"root.hcl",
 		"units/networking/terragrunt.hcl",
-		"live/main/dev/terragrunt.stack.hcl",
-		"live/main/prod/terragrunt.stack.hcl",
+		"live/stage/terragrunt.stack.hcl",
+		"live/prod/terragrunt.stack.hcl",
 		"modules/networking/main.tf",
 		"modules/networking/outputs.tf",
 		"modules/networking/variables.tf",
@@ -79,7 +75,7 @@ func TestRenderIsDeterministic(t *testing.T) {
 
 func TestRenderRootHCLContent(t *testing.T) {
 	root := render(t, sampleSpec())["root.hcl"]
-	for _, want := range []string{`bucket  = "swale-main-tfstate"`, `region  = "us-east-1"`} {
+	for _, want := range []string{`bucket  = "acme-api-tfstate-0a1b2c3d"`, `region  = "us-east-1"`, `App = "acme-api"`} {
 		if !strings.Contains(root, want) {
 			t.Errorf("root.hcl missing %q:\n%s", want, root)
 		}
@@ -89,8 +85,8 @@ func TestRenderRootHCLContent(t *testing.T) {
 func TestRenderStackContentPerEnv(t *testing.T) {
 	got := render(t, sampleSpec())
 	for path, wants := range map[string][]string{
-		"live/main/dev/terragrunt.stack.hcl":  {`vpc_cidr = "10.0.0.0/16"`, `nat_mode = "single"`},
-		"live/main/prod/terragrunt.stack.hcl": {`vpc_cidr = "10.1.0.0/16"`, `nat_mode = "per_az"`},
+		"live/stage/terragrunt.stack.hcl": {`name     = "acme-api-stage"`, `vpc_cidr = "10.20.0.0/16"`, `nat_mode = "single"`},
+		"live/prod/terragrunt.stack.hcl":  {`name     = "acme-api-prod"`, `vpc_cidr = "10.30.0.0/16"`, `nat_mode = "per_az"`},
 	} {
 		for _, want := range wants {
 			if !strings.Contains(got[path], want) {
@@ -100,21 +96,55 @@ func TestRenderStackContentPerEnv(t *testing.T) {
 	}
 }
 
-func TestRenderRejectsMultiAccount(t *testing.T) {
+// TestEveryKnownEnvironmentHasAProfile guards the link between spec and
+// generate: spec.Validate accepts every name in spec.KnownEnvironments, so
+// Render must know how to build each of them.
+func TestEveryKnownEnvironmentHasAProfile(t *testing.T) {
+	for _, env := range spec.KnownEnvironments {
+		if _, ok := profiles[env]; !ok {
+			t.Errorf("no profile for %q", env)
+		}
+	}
+}
+
+func TestProfilesDoNotOverlap(t *testing.T) {
+	seen := map[string]string{}
+	for env, p := range profiles {
+		if other, dup := seen[p.vpcCIDR]; dup {
+			t.Errorf("%s and %s share VPC CIDR %s", env, other, p.vpcCIDR)
+		}
+		seen[p.vpcCIDR] = env
+	}
+}
+
+func TestRenderReadme(t *testing.T) {
+	readme := render(t, sampleSpec())["README.md"]
+	for _, want := range []string{
+		"# acme-api",
+		"- **stage**: a private network (`10.20.0.0/16`)",
+		"Both zones share one NAT gateway",
+		"- **prod**: a private network (`10.30.0.0/16`)",
+		"Each zone has its own NAT gateway",
+		"This project has 3 NAT gateways",
+		"cd live/stage\n",
+		"`acme-api-tfstate-0a1b2c3d`",
+		"- `live/prod`",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing %q:\n%s", want, readme)
+		}
+	}
+}
+
+func TestRenderReadmeSingleEnvironment(t *testing.T) {
 	s := sampleSpec()
-	s.Accounts = spec.AccountsSpec{
-		Mode: spec.AccountModeMulti,
-		Accounts: []spec.Account{
-			{Name: "mgmt", IsManagement: true},
-			{Name: "dev"},
-		},
+	s.Environments = []string{"prod"}
+	readme := render(t, s)["README.md"]
+	if strings.Contains(readme, "other environments") {
+		t.Errorf("README.md for a single environment mentions other environments:\n%s", readme)
 	}
-	_, err := Render(s)
-	if err == nil {
-		t.Fatal("Render: want error for multi-account spec, got nil")
-	}
-	if !strings.Contains(err.Error(), "single-account") {
-		t.Errorf("Render error = %q, want it to mention single-account", err.Error())
+	if !strings.Contains(readme, "This project has 2 NAT gateways") {
+		t.Errorf("README.md for prod alone should count its 2 NAT gateways:\n%s", readme)
 	}
 }
 
@@ -123,7 +153,7 @@ func TestRenderNoRemoteModulePinning(t *testing.T) {
 	if strings.Contains(unit, "ref=") {
 		t.Errorf("units/networking/terragrunt.hcl references a remote module (ref=...), want a local vendored path:\n%s", unit)
 	}
-	if !strings.Contains(unit, "../../../../../modules/networking") {
+	if !strings.Contains(unit, "../../../../modules/networking") {
 		t.Errorf("units/networking/terragrunt.hcl does not reference the vendored module by local relative path:\n%s", unit)
 	}
 }

@@ -3,10 +3,10 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,90 +16,76 @@ import (
 
 // initAnswers is what both "swale init" front doors collect: flags (for
 // scripts and CI) and the interactive wizard. Each front door only fills
-// this in; toSpec and spec.Save own the rules, so the two can't drift.
-// accountName is the only account in single-account mode and the
-// management account in multi-account mode.
+// this in; toSpec and spec.Validate own the rules, so the two can't drift.
 type initAnswers struct {
+	name         string
 	region       string
-	multiAccount bool
-	accountName  string
-	envs         []envAnswers
+	environments int
 }
 
-type envAnswers struct {
-	name    string
-	vpcCIDR string
-	nat     spec.NATMode
-}
-
-// toSpec builds the Spec without validating it; spec.Save does that.
-// Multi-account mode names each workload account after its environment.
-func (a initAnswers) toSpec() spec.Spec {
-	s := spec.Spec{Region: a.region}
-	s.Accounts.Mode = spec.AccountModeSingle
-	if a.multiAccount {
-		s.Accounts.Mode = spec.AccountModeMulti
+// toSpec builds the Spec without validating it, except for the name: the
+// state bucket is named after the app, so a bad name would otherwise be
+// reported twice. random supplies the bucket name's suffix.
+func (a initAnswers) toSpec(random io.Reader) (spec.Spec, error) {
+	if err := spec.CheckName(a.name); err != nil {
+		return spec.Spec{}, fmt.Errorf("name: %w", err)
 	}
-	s.Accounts.Accounts = []spec.Account{{Name: a.accountName, IsManagement: a.multiAccount}}
-
-	for _, e := range a.envs {
-		account := a.accountName
-		if a.multiAccount {
-			account = e.name
-			s.Accounts.Accounts = append(s.Accounts.Accounts, spec.Account{Name: e.name})
-		}
-		nat := e.nat
-		if nat == "" {
-			nat = spec.DefaultNAT(e.name)
-		}
-		s.Environments = append(s.Environments, spec.Environment{
-			Name:       e.name,
-			Account:    account,
-			Networking: spec.NetworkingSpec{VPCCIDR: e.vpcCIDR, NAT: nat},
-		})
+	envs, err := spec.EnvironmentsFor(a.environments)
+	if err != nil {
+		return spec.Spec{}, err
 	}
-	return s
+	bucket, err := spec.NewStateBucket(a.name, random)
+	if err != nil {
+		return spec.Spec{}, err
+	}
+	return spec.Spec{Name: a.name, Region: a.region, Environments: envs, StateBucket: bucket}, nil
 }
 
-func newInitCmd() *cobra.Command {
-	var f initFlags
+// newInitCmd builds "swale init". random supplies the state bucket name's
+// suffix: crypto/rand.Reader, or a fixed reader in tests.
+func newInitCmd(random io.Reader) *cobra.Command {
+	var a initAnswers
 
 	cmd := &cobra.Command{
 		Use:   "init [dir]",
 		Short: "Create a new swale project",
 		Long: `Create a new swale project in dir (default: the current directory): a
-swale.yaml spec, and the Terragrunt/Terraform project generated from it.
+swale.yaml describing your app, and the Terragrunt/Terraform project
+generated from it.
 
-Run with no flags to fill in an interactive form. Pass flags instead to run
-non-interactively, e.g. in scripts or CI.`,
+Run with no flags to answer a few questions about your app. Pass flags
+instead to run non-interactively, e.g. in scripts or CI; any you leave out
+take their defaults.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := projectDir(args)
 			specPath := filepath.Join(dir, spec.FileName)
-			// Checked before asking anything, so nobody fills in the whole
-			// form only to be told the project already exists.
+			// Checked before asking anything, so nobody answers every
+			// question only to be told the project already exists.
 			if _, err := os.Stat(specPath); err == nil {
 				return fmt.Errorf("%s already exists; edit it and run \"swale generate\", or delete it to start over", specPath)
 			} else if !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
 
-			var (
-				a   initAnswers
-				err error
-			)
-			if cmd.Flags().NFlag() == 0 {
-				a, err = runWizard()
-			} else {
-				a, err = f.answers()
+			if a.name == "" {
+				a.name = nameFromDir(dir)
 			}
-			if err != nil {
-				return err
+			if cmd.Flags().NFlag() == 0 {
+				var err error
+				if a, err = runWizard(a); err != nil {
+					return err
+				}
+			} else if a.name == "" {
+				return errors.New("--name is required, since the directory name isn't a valid app name")
 			}
 
 			// Render before writing anything, so a spec swale can't generate
 			// leaves no half-created project behind.
-			s := a.toSpec()
+			s, err := a.toSpec(random)
+			if err != nil {
+				return err
+			}
 			if err := s.Validate(); err != nil {
 				return err
 			}
@@ -127,81 +113,23 @@ non-interactively, e.g. in scripts or CI.`,
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&f.region, "region", "", "AWS region generated infrastructure is deployed into, e.g. us-east-1")
-	flags.StringArrayVar(&f.envs, "env", nil, "environment name (repeatable), e.g. --env dev --env prod")
-	flags.BoolVar(&f.singleAccount, "single-account", false, "use a single AWS account shared by every environment")
-	flags.BoolVar(&f.multiAccount, "multi-account", false, "use one AWS account per environment plus a management account")
-	flags.StringVar(&f.accountName, "account-name", "main", "account name to use in --single-account mode")
-	flags.StringVar(&f.managementAccount, "management-account", "", "management account name, required in --multi-account mode")
-	flags.StringArrayVar(&f.vpcCIDRs, "vpc-cidr", nil, "VPC CIDR for an environment, as env=cidr (repeatable, required for every --env)")
-	flags.StringArrayVar(&f.natModes, "nat", nil, `NAT mode for an environment, as env=single|per_az (repeatable, optional; defaults to per_az for "prod", single otherwise)`)
-
-	cmd.MarkFlagsMutuallyExclusive("single-account", "multi-account")
-	cmd.MarkFlagsMutuallyExclusive("single-account", "management-account")
-	cmd.MarkFlagsMutuallyExclusive("multi-account", "account-name")
+	flags.StringVar(&a.name, "name", "", "app name, used to name its AWS resources (default: the directory name)")
+	flags.StringVar(&a.region, "region", "us-east-1", "AWS region to run in")
+	flags.IntVar(&a.environments, "environments", 2, "how many environments: 1 (prod), 2 (stage, prod) or 3 (dev, stage, prod)")
 
 	return cmd
 }
 
-type initFlags struct {
-	region            string
-	envs              []string
-	singleAccount     bool
-	multiAccount      bool
-	accountName       string
-	managementAccount string
-	vpcCIDRs          []string
-	natModes          []string
-}
-
-func (f initFlags) answers() (initAnswers, error) {
-	if !f.singleAccount && !f.multiAccount {
-		return initAnswers{}, errors.New("specify one of --single-account or --multi-account")
-	}
-	accountName := f.accountName
-	if f.multiAccount {
-		if f.managementAccount == "" {
-			return initAnswers{}, errors.New("--management-account is required with --multi-account")
-		}
-		accountName = f.managementAccount
-	}
-
-	known := make(map[string]bool, len(f.envs))
-	for _, e := range f.envs {
-		known[e] = true
-	}
-	cidrs, err := parsePairs("vpc-cidr", f.vpcCIDRs, known)
+// nameFromDir suggests the project directory's name as the app name, or
+// returns "" when it isn't a valid one.
+func nameFromDir(dir string) string {
+	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return initAnswers{}, err
+		return ""
 	}
-	nats, err := parsePairs("nat", f.natModes, known)
-	if err != nil {
-		return initAnswers{}, err
+	name := filepath.Base(abs)
+	if spec.CheckName(name) != nil {
+		return ""
 	}
-
-	a := initAnswers{region: f.region, multiAccount: f.multiAccount, accountName: accountName}
-	for _, e := range f.envs {
-		a.envs = append(a.envs, envAnswers{name: e, vpcCIDR: cidrs[e], nat: spec.NATMode(nats[e])})
-	}
-	return a, nil
-}
-
-// parsePairs parses repeated "env=value" flag values, rejecting malformed
-// pairs, envs not passed via --env, and duplicates.
-func parsePairs(flag string, pairs []string, envs map[string]bool) (map[string]string, error) {
-	result := make(map[string]string, len(pairs))
-	for _, p := range pairs {
-		env, value, ok := strings.Cut(p, "=")
-		if !ok || env == "" || value == "" {
-			return nil, fmt.Errorf("--%s: %q must be in the form env=value", flag, p)
-		}
-		if !envs[env] {
-			return nil, fmt.Errorf("--%s: env %q was not passed via --env", flag, env)
-		}
-		if _, dup := result[env]; dup {
-			return nil, fmt.Errorf("--%s: env %q specified more than once", flag, env)
-		}
-		result[env] = value
-	}
-	return result, nil
+	return name
 }

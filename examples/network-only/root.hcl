@@ -6,10 +6,10 @@ terragrunt_version_constraint = ">= 1.1.0"
 locals {
   # path_relative_to_include() bakes a ".terragrunt-stack/<unit>" segment
   # into the path when a unit is materialized via `terragrunt stack
-  # generate`, e.g. "live/<account>/<env>/.terragrunt-stack/<unit>". Strip
-  # it so the state key reflects the logical account/env/component path,
-  # not stacks' disposable build-artifact layout. This is a no-op for units
-  # that aren't stack-materialized, since the segment is simply absent.
+  # generate`, e.g. "live/<env>/.terragrunt-stack/<unit>". Strip it so the
+  # state key reflects the logical env/component path, not stacks'
+  # disposable build-artifact layout. This is a no-op for units that aren't
+  # stack-materialized, since the segment is simply absent.
   state_key = replace(path_relative_to_include(), ".terragrunt-stack/", "")
 }
 
@@ -25,7 +25,7 @@ remote_state {
   }
 
   config = {
-    bucket  = "swale-main-tfstate"
+    bucket  = "acme-api-tfstate-0a1b2c3d"
     key     = "${local.state_key}/terraform.tfstate"
     region  = "us-east-1"
     encrypt = true
@@ -47,6 +47,7 @@ generate "provider" {
       default_tags {
         tags = {
           ManagedBy = "swale"
+          App = "acme-api"
         }
       }
     }

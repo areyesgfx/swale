@@ -1,6 +1,6 @@
 // Package generate turns a spec.Spec into a Terragrunt/Terraform project:
 // root.hcl, a unit catalog and vendored module per component, and one
-// live/<account>/<env>/ stack per environment.
+// live/<env>/ stack per environment.
 //
 // Render decides every file's path and content without touching disk;
 // Write is the only part that does I/O. Keeping the rules in a pure
@@ -28,39 +28,83 @@ type File struct {
 	Content string
 }
 
+// profile is the infrastructure swale derives for an environment, so the
+// user never has to choose network ranges or NAT layouts.
+//
+// Every environment has its own fixed address range, rather than one
+// assigned by its position in swale.yaml, so adding or removing an
+// environment never shifts another's, and ranges never overlap in case the
+// networks are ever connected. Only prod pays for a NAT gateway per
+// availability zone.
+type profile struct {
+	vpcCIDR string
+	natMode string
+}
+
+var profiles = map[string]profile{
+	"dev":   {vpcCIDR: "10.10.0.0/16", natMode: "single"},
+	"stage": {vpcCIDR: "10.20.0.0/16", natMode: "single"},
+	"prod":  {vpcCIDR: "10.30.0.0/16", natMode: "per_az"},
+}
+
+// azCount matches the networking module's az_count default.
+const azCount = 2
+
 // Render returns every file of the project generated from s, in a stable
-// order. Only single-account specs are supported so far.
+// order. s must be valid (see spec.Spec.Validate).
 func Render(s spec.Spec) ([]File, error) {
-	if s.Accounts.Mode != spec.AccountModeSingle {
-		return nil, fmt.Errorf("generate: only single-account specs are supported (got mode %q)", s.Accounts.Mode)
+	envs := make([]templates.EnvironmentData, 0, len(s.Environments))
+	natGateways := 0
+	for _, name := range s.Environments {
+		p, ok := profiles[name]
+		if !ok {
+			return nil, fmt.Errorf("generate: no infrastructure profile for environment %q", name)
+		}
+		env := templates.EnvironmentData{
+			Name:         name,
+			ResourceName: s.Name + "-" + name,
+			VPCCIDR:      p.vpcCIDR,
+			NATMode:      p.natMode,
+			NATGateways:  1,
+		}
+		if p.natMode == "per_az" {
+			env.NATGateways = azCount
+		}
+		natGateways += env.NATGateways
+		envs = append(envs, env)
 	}
-	if len(s.Accounts.Accounts) < 1 {
-		return nil, errors.New("generate: spec has no accounts")
-	}
-	account := s.Accounts.Accounts[0]
 
 	root, err := templates.RenderRoot(templates.RootData{
-		StateBucket: fmt.Sprintf("swale-%s-tfstate", account.Name),
+		StateBucket: s.StateBucket,
 		Region:      s.Region,
+		Tags:        map[string]string{"App": s.Name},
+	})
+	if err != nil {
+		return nil, err
+	}
+	readme, err := templates.RenderReadme(templates.ReadmeData{
+		Name:         s.Name,
+		Region:       s.Region,
+		StateBucket:  s.StateBucket,
+		Environments: envs,
+		NATGateways:  natGateways,
 	})
 	if err != nil {
 		return nil, err
 	}
 	files := []File{
 		{Path: ".gitignore", Content: templates.GitIgnore},
+		{Path: "README.md", Content: readme},
 		{Path: "root.hcl", Content: root},
 		{Path: "units/networking/terragrunt.hcl", Content: templates.NetworkingUnitHCL},
 	}
 
-	for _, env := range s.Environments {
-		stack, err := templates.RenderNetworkingStack(templates.NetworkingStackData{
-			VPCCIDR: env.Networking.VPCCIDR,
-			NATMode: string(env.Networking.NAT),
-		})
+	for _, env := range envs {
+		stack, err := templates.RenderStack(env)
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, File{Path: path.Join(StackDir(s, env.Name), "terragrunt.stack.hcl"), Content: stack})
+		files = append(files, File{Path: path.Join(StackDir(env.Name), "terragrunt.stack.hcl"), Content: stack})
 	}
 
 	networking, err := vendorModule(modules.Networking, "networking")
@@ -72,8 +116,8 @@ func Render(s spec.Spec) ([]File, error) {
 
 // StackDir is the slash-separated directory, relative to the project root,
 // that holds env's terragrunt.stack.hcl.
-func StackDir(s spec.Spec, env string) string {
-	return path.Join("live", s.Accounts.Accounts[0].Name, env)
+func StackDir(env string) string {
+	return path.Join("live", env)
 }
 
 // vendorModule returns the embedded module rooted at name inside src as

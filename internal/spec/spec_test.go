@@ -1,6 +1,7 @@
 package spec_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,57 +11,88 @@ import (
 	"github.com/areyesgfx/swale/internal/spec"
 )
 
-// validMulti returns a valid multi-account spec used as the baseline that
-// the validation table tests mutate into invalid variants.
-func validMulti() spec.Spec {
+func valid() spec.Spec {
 	return spec.Spec{
-		Region: "us-east-1",
-		Accounts: spec.AccountsSpec{
-			Mode: spec.AccountModeMulti,
-			Accounts: []spec.Account{
-				{Name: "mgmt", IsManagement: true},
-				{Name: "workloads"},
-			},
-		},
-		Environments: []spec.Environment{
-			{Name: "dev", Account: "workloads", Networking: spec.NetworkingSpec{VPCCIDR: "10.0.0.0/16", NAT: spec.NATModeSingle}},
-			{Name: "prod", Account: "workloads", Networking: spec.NetworkingSpec{VPCCIDR: "10.1.0.0/16", NAT: spec.NATModePerAZ}},
-		},
-	}
-}
-
-func validSingle() spec.Spec {
-	return spec.Spec{
-		Region: "us-east-1",
-		Accounts: spec.AccountsSpec{
-			Mode:     spec.AccountModeSingle,
-			Accounts: []spec.Account{{Name: "main"}},
-		},
-		Environments: []spec.Environment{
-			{Name: "dev", Account: "main", Networking: spec.NetworkingSpec{VPCCIDR: "10.0.0.0/16", NAT: spec.NATModeSingle}},
-		},
+		Name:         "acme-api",
+		Region:       "us-east-1",
+		Environments: []string{"stage", "prod"},
+		StateBucket:  "acme-api-tfstate-0a1b2c3d",
 	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
-	cases := map[string]spec.Spec{
-		"multi":  validMulti(),
-		"single": validSingle(),
+	want := valid()
+	path := filepath.Join(t.TempDir(), spec.FileName)
+	if err := spec.Save(want, path); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
-	for name, want := range cases {
-		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "swale.yaml")
-			if err := spec.Save(want, path); err != nil {
-				t.Fatalf("Save: %v", err)
-			}
-			got, err := spec.Load(path)
-			if err != nil {
-				t.Fatalf("Load: %v", err)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("round-trip mismatch:\n got: %#v\nwant: %#v", got, want)
-			}
-		})
+	got, err := spec.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round-trip mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestSaveWritesExplanatoryComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), spec.FileName)
+	if err := spec.Save(valid(), path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# swale.yaml describes your app.", "# The S3 bucket that stores Terraform state."} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf("swale.yaml missing comment %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestEnvironmentsFor(t *testing.T) {
+	for count, want := range map[int][]string{
+		1: {"prod"},
+		2: {"stage", "prod"},
+		3: {"dev", "stage", "prod"},
+	} {
+		got, err := spec.EnvironmentsFor(count)
+		if err != nil {
+			t.Fatalf("EnvironmentsFor(%d): %v", count, err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("EnvironmentsFor(%d) = %v, want %v", count, got, want)
+		}
+	}
+	for _, count := range []int{0, 4} {
+		if _, err := spec.EnvironmentsFor(count); err == nil {
+			t.Errorf("EnvironmentsFor(%d): want error, got nil", count)
+		}
+	}
+}
+
+func TestEnvironmentsForReturnsACopy(t *testing.T) {
+	envs, err := spec.EnvironmentsFor(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envs[0] = "changed"
+	if spec.KnownEnvironments[0] != "dev" {
+		t.Errorf("modifying EnvironmentsFor's result changed KnownEnvironments to %v", spec.KnownEnvironments)
+	}
+}
+
+func TestNewStateBucket(t *testing.T) {
+	got, err := spec.NewStateBucket("acme-api", bytes.NewReader([]byte{0x0a, 0x1b, 0x2c, 0x3d}))
+	if err != nil {
+		t.Fatalf("NewStateBucket: %v", err)
+	}
+	if want := "acme-api-tfstate-0a1b2c3d"; got != want {
+		t.Errorf("NewStateBucket = %q, want %q", got, want)
+	}
+	if _, err := spec.NewStateBucket("acme-api", bytes.NewReader(nil)); err == nil {
+		t.Error("NewStateBucket with no randomness available: want error, got nil")
 	}
 }
 
@@ -70,34 +102,24 @@ func TestValidateInvalid(t *testing.T) {
 		mutate  func(*spec.Spec)
 		wantSub string
 	}{
+		{"empty name", func(s *spec.Spec) { s.Name = "" }, "name: must not be empty"},
+		{"uppercase name", func(s *spec.Spec) { s.Name = "Acme" }, "lowercase letters"},
+		{"name with double dash", func(s *spec.Spec) { s.Name = "acme--api" }, "single dashes"},
+		{"name ending in dash", func(s *spec.Spec) { s.Name = "acme-" }, "single dashes"},
+		{"name starting with digit", func(s *spec.Spec) { s.Name = "1acme" }, "starting with a letter"},
+		{"name too long", func(s *spec.Spec) { s.Name = strings.Repeat("a", 21) }, "longer than 20"},
 		{"empty region", func(s *spec.Spec) { s.Region = "" }, "region: must not be empty"},
 		{"malformed region", func(s *spec.Spec) { s.Region = "not-a-region" }, "does not look like an AWS region"},
 		{"no environments", func(s *spec.Spec) { s.Environments = nil }, "at least one environment"},
-		{"empty env name", func(s *spec.Spec) { s.Environments[0].Name = "" }, "environments[0].name"},
-		{"duplicate env name", func(s *spec.Spec) { s.Environments[1].Name = "dev" }, "duplicate environment name"},
-		{"unknown account ref", func(s *spec.Spec) { s.Environments[0].Account = "nope" }, "does not match any account"},
-		{"empty account ref", func(s *spec.Spec) { s.Environments[0].Account = "" }, "account: must not be empty"},
-		{"bad mode", func(s *spec.Spec) { s.Accounts.Mode = "sometimes" }, "not a valid account mode"},
-		{"empty account name", func(s *spec.Spec) { s.Accounts.Accounts[1].Name = "" }, "accounts.accounts[1].name"},
-		{"duplicate account name", func(s *spec.Spec) { s.Accounts.Accounts[1].Name = "mgmt" }, "duplicate account name"},
-		{"multi without mgmt", func(s *spec.Spec) { s.Accounts.Accounts[0].IsManagement = false }, "exactly one management account"},
-		{"single with two accounts", func(s *spec.Spec) {
-			*s = validSingle()
-			s.Accounts.Accounts = append(s.Accounts.Accounts, spec.Account{Name: "extra"})
-		}, "requires exactly one account"},
-		{"single with mgmt", func(s *spec.Spec) {
-			*s = validSingle()
-			s.Accounts.Accounts[0].IsManagement = true
-		}, "must not declare a management account"},
-		{"empty cidr", func(s *spec.Spec) { s.Environments[0].Networking.VPCCIDR = "" }, "vpc_cidr: must not be empty"},
-		{"malformed cidr", func(s *spec.Spec) { s.Environments[0].Networking.VPCCIDR = "10.0.0.0/33" }, "not valid CIDR notation"},
-		{"cidr host bits set", func(s *spec.Spec) { s.Environments[0].Networking.VPCCIDR = "10.0.0.5/16" }, "host bits set"},
-		{"ipv6 cidr", func(s *spec.Spec) { s.Environments[0].Networking.VPCCIDR = "2001:db8::/32" }, "must be an IPv4 CIDR"},
-		{"bad nat mode", func(s *spec.Spec) { s.Environments[0].Networking.NAT = "double" }, "not a valid NAT mode"},
+		{"unknown environment", func(s *spec.Spec) { s.Environments = []string{"qa"} }, `"qa" is not one of`},
+		{"duplicate environment", func(s *spec.Spec) { s.Environments = []string{"prod", "prod"} }, "listed more than once"},
+		{"empty state bucket", func(s *spec.Spec) { s.StateBucket = "" }, "state_bucket: must not be empty"},
+		{"state bucket with dots", func(s *spec.Spec) { s.StateBucket = "acme.tfstate" }, "lowercase letters, numbers and dashes"},
+		{"state bucket too long", func(s *spec.Spec) { s.StateBucket = strings.Repeat("a", 64) }, "3 to 63 characters"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := validMulti()
+			s := valid()
 			tt.mutate(&s)
 			err := s.Validate()
 			if err == nil {
@@ -111,14 +133,14 @@ func TestValidateInvalid(t *testing.T) {
 }
 
 func TestValidateReportsAllProblems(t *testing.T) {
-	s := validMulti()
-	s.Accounts.Mode = "bogus"
-	s.Environments[0].Networking.NAT = "bogus"
+	s := valid()
+	s.Name = ""
+	s.Environments = []string{"qa"}
 	err := s.Validate()
 	if err == nil {
 		t.Fatal("Validate: want error, got nil")
 	}
-	for _, want := range []string{"not a valid account mode", "not a valid NAT mode"} {
+	for _, want := range []string{"name: must not be empty", `"qa" is not one of`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Validate error = %q, want it to contain %q", err.Error(), want)
 		}
@@ -126,9 +148,9 @@ func TestValidateReportsAllProblems(t *testing.T) {
 }
 
 func TestSaveRefusesInvalidSpec(t *testing.T) {
-	s := validMulti()
-	s.Environments[0].Networking.VPCCIDR = "not-a-cidr"
-	path := filepath.Join(t.TempDir(), "swale.yaml")
+	s := valid()
+	s.Region = "nope"
+	path := filepath.Join(t.TempDir(), spec.FileName)
 	if err := spec.Save(s, path); err == nil {
 		t.Fatal("Save: want error for invalid spec, got nil")
 	}
@@ -138,8 +160,8 @@ func TestSaveRefusesInvalidSpec(t *testing.T) {
 }
 
 func TestLoadRejectsUnknownField(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "swale.yaml")
-	body := "accounts:\n  mode: single\n  accounts:\n    - name: main\ntypo_field: oops\n"
+	path := filepath.Join(t.TempDir(), spec.FileName)
+	body := "name: acme-api\ntypo_field: oops\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

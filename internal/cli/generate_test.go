@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/areyesgfx/swale/internal/spec"
 )
 
 func TestGenerateRecreatesMissingFilesAndKeepsEdits(t *testing.T) {
@@ -12,7 +14,7 @@ func TestGenerateRecreatesMissingFilesAndKeepsEdits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	prodStack := filepath.Join(dir, "live/main/prod/terragrunt.stack.hcl")
+	prodStack := filepath.Join(dir, "live/prod/terragrunt.stack.hcl")
 	if err := os.Remove(prodStack); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +27,7 @@ func TestGenerateRecreatesMissingFilesAndKeepsEdits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	for _, want := range []string{"created  live/main/prod/terragrunt.stack.hcl", "kept     root.hcl"} {
+	for _, want := range []string{"created  live/prod/terragrunt.stack.hcl", "kept     root.hcl"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("generate output missing %q:\n%s", want, out)
 		}
@@ -35,6 +37,36 @@ func TestGenerateRecreatesMissingFilesAndKeepsEdits(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(root); string(got) != "# edited\n" {
 		t.Errorf("root.hcl = %q, want the edit kept", got)
+	}
+}
+
+func TestGenerateAddsAnEnvironment(t *testing.T) {
+	dir, _, err := runInit(t, "--name", "acme-api", "--environments", "2")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	specPath := filepath.Join(dir, spec.FileName)
+	s, err := spec.Load(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Environments = append([]string{"dev"}, s.Environments...)
+	if err := os.Remove(specPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := spec.Save(s, specPath); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, newGenerateCmd(), dir)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !strings.Contains(out, "created  live/dev/terragrunt.stack.hcl") {
+		t.Errorf("generate did not create the new environment:\n%s", out)
+	}
+	if strings.Contains(out, "live/stage") || strings.Contains(out, "live/prod") {
+		t.Errorf("generate touched existing environments:\n%s", out)
 	}
 }
 

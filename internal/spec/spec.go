@@ -1,65 +1,53 @@
-// Package spec defines Spec, the intermediate representation both of
-// swale's front doors (wizard and CLI flags) produce, and that
-// internal/generate consumes to emit Terraform/Terragrunt.
-// Compute, storage, and secrets sections are added by later phases once
-// their shape is decided, rather than stubbed out here ahead of time.
+// Package spec defines Spec, the contents of swale.yaml: what an app needs,
+// in the terms of the developer building it. Both front doors (the
+// interactive wizard and CLI flags) produce a Spec, and internal/generate
+// derives the infrastructure from it, so nothing in a Spec requires knowing
+// AWS networking.
 package spec
 
-// Spec is the root of a swale.yaml file. v1 supports exactly one region
-// per project.
+import (
+	"encoding/hex"
+	"fmt"
+	"io"
+)
+
+// Spec is the root of a swale.yaml file. Environments are a subset of
+// KnownEnvironments, in any order.
+//
+// StateBucket is picked once, when the project is created, rather than
+// derived from Name: S3 bucket names are global across every AWS account,
+// so a name-derived bucket would collide with any other swale project
+// that has the same name.
 type Spec struct {
-	Region       string        `yaml:"region"`
-	Accounts     AccountsSpec  `yaml:"accounts"`
-	Environments []Environment `yaml:"environments"`
+	Name         string   `yaml:"name"`
+	Region       string   `yaml:"region"`
+	Environments []string `yaml:"environments"`
+	StateBucket  string   `yaml:"state_bucket"`
 }
 
-// AccountsSpec describes the AWS account topology. In AccountModeSingle,
-// Accounts holds exactly one entry. In AccountModeMulti, it holds one
-// workload account per environment plus one management account.
-type AccountsSpec struct {
-	Mode     AccountMode `yaml:"mode"`
-	Accounts []Account   `yaml:"accounts"`
-}
+// KnownEnvironments lists every environment swale knows how to build,
+// from least to most critical.
+var KnownEnvironments = []string{"dev", "stage", "prod"}
 
-type AccountMode string
-
-const (
-	AccountModeSingle AccountMode = "single"
-	AccountModeMulti  AccountMode = "multi"
-)
-
-// Account is an AWS account folder under live/<account>/.
-type Account struct {
-	Name         string `yaml:"name"`
-	IsManagement bool   `yaml:"is_management"`
-}
-
-// Environment is a single deployment environment, e.g. "dev" or "prod".
-// Account must match the Name of an entry in AccountsSpec.Accounts.
-type Environment struct {
-	Name       string         `yaml:"name"`
-	Account    string         `yaml:"account"`
-	Networking NetworkingSpec `yaml:"networking"`
-}
-
-type NetworkingSpec struct {
-	VPCCIDR string  `yaml:"vpc_cidr"`
-	NAT     NATMode `yaml:"nat"`
-}
-
-type NATMode string
-
-const (
-	NATModeSingle NATMode = "single"
-	NATModePerAZ  NATMode = "per_az"
-)
-
-// DefaultNAT is the NAT policy both front doors apply when the user
-// doesn't choose: one NAT gateway per AZ for "prod", a single shared one
-// everywhere else.
-func DefaultNAT(env string) NATMode {
-	if env == "prod" {
-		return NATModePerAZ
+// EnvironmentsFor answers "how many environments do you need?". Smaller
+// projects drop the least critical environments first, so prod is always
+// there and the first environment in the list is the safest place to try
+// a deploy.
+func EnvironmentsFor(count int) ([]string, error) {
+	if count < 1 || count > len(KnownEnvironments) {
+		return nil, fmt.Errorf("swale supports 1 to %d environments, got %d", len(KnownEnvironments), count)
 	}
-	return NATModeSingle
+	envs := KnownEnvironments[len(KnownEnvironments)-count:]
+	return append([]string(nil), envs...), nil
+}
+
+// NewStateBucket returns a state bucket name for an app called name, with
+// a random suffix read from random (crypto/rand.Reader outside tests) so
+// it doesn't collide with another project's bucket.
+func NewStateBucket(name string, random io.Reader) (string, error) {
+	suffix := make([]byte, 4)
+	if _, err := io.ReadFull(random, suffix); err != nil {
+		return "", fmt.Errorf("pick a state bucket name: %w", err)
+	}
+	return fmt.Sprintf("%s-tfstate-%s", name, hex.EncodeToString(suffix)), nil
 }

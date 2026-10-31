@@ -3,10 +3,11 @@ include "root" {
 }
 
 terraform {
-  source = "${get_terragrunt_dir()}/../../../../../modules/networking"
+  source = "${get_terragrunt_dir()}/../../../../modules/networking"
 }
 
 inputs = {
+  name     = values.name
   vpc_cidr = values.vpc_cidr
   nat_mode = values.nat_mode
 }
