@@ -7,10 +7,10 @@ terragrunt_version_constraint = ">= 1.1.0"
 locals {
   # path_relative_to_include() bakes a ".terragrunt-stack/<unit>" segment
   # into the path when a unit is materialized via `terragrunt stack
-  # generate` (ADR 0005). Strip it so the state key reflects the logical
-  # account/env/component path, not stacks' disposable build-artifact
-  # layout - see stacks-lab/FINDINGS.md #2. This is a no-op for units that
-  # aren't stack-materialized, since the segment is simply absent.
+  # generate` (ADR 0005), e.g. "live/<account>/<env>/.terragrunt-stack/<unit>".
+  # Strip it so the state key reflects the logical account/env/component
+  # path, not stacks' disposable build-artifact layout. This is a no-op for
+  # units that aren't stack-materialized, since the segment is simply absent.
   state_key = replace(path_relative_to_include(), ".terragrunt-stack/", "")
 }
 
