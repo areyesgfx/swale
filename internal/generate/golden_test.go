@@ -33,22 +33,25 @@ func TestExamplesGolden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			files, err := Render(s)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			if *update {
 				if err := removeAllExcept(dir, "swale.yaml"); err != nil {
 					t.Fatal(err)
 				}
-				if err := Generate(s, dir); err != nil {
+				if _, err := Write(dir, files); err != nil {
 					t.Fatal(err)
 				}
 				return
 			}
 
-			out := t.TempDir()
-			if err := Generate(s, out); err != nil {
-				t.Fatal(err)
+			got := make(map[string]string, len(files))
+			for _, f := range files {
+				got[f.Path] = f.Content
 			}
-			got := readTree(t, out)
 			want := readTree(t, dir)
 			delete(want, "swale.yaml")
 

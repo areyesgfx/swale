@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -9,33 +11,46 @@ import (
 	"testing/iotest"
 
 	"charm.land/huh/v2"
+	"github.com/spf13/cobra"
 
 	"github.com/areyesgfx/swale/internal/spec"
 )
 
-func runInit(t *testing.T, args ...string) (string, error) {
+// run executes cmd with args and returns what it printed to stdout.
+func run(t *testing.T, cmd *cobra.Command, args ...string) (string, error) {
 	t.Helper()
-	out := filepath.Join(t.TempDir(), "swale.yaml")
-	cmd := newInitCmd()
-	cmd.SetOut(io.Discard)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs(append(args, "--output", out))
-	return out, cmd.Execute()
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// runInit runs "swale init" with args in a fresh project directory, which
+// it returns along with the command's output.
+func runInit(t *testing.T, args ...string) (dir, out string, err error) {
+	t.Helper()
+	dir = t.TempDir()
+	out, err = run(t, newInitCmd(), append(args, dir)...)
+	return dir, out, err
+}
+
+var validInitFlags = []string{
+	"--region", "us-east-1",
+	"--env", "dev",
+	"--env", "prod",
+	"--single-account",
+	"--vpc-cidr", "dev=10.0.0.0/16",
+	"--vpc-cidr", "prod=10.1.0.0/16",
 }
 
 func TestInitFlagsSingleAccount(t *testing.T) {
-	out, err := runInit(t,
-		"--region", "us-east-1",
-		"--env", "dev",
-		"--env", "prod",
-		"--single-account",
-		"--vpc-cidr", "dev=10.0.0.0/16",
-		"--vpc-cidr", "prod=10.1.0.0/16",
-	)
+	dir, out, err := runInit(t, validInitFlags...)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	got, err := spec.Load(out)
+	got, err := spec.Load(filepath.Join(dir, spec.FileName))
 	if err != nil {
 		t.Fatalf("spec.Load: %v", err)
 	}
@@ -53,26 +68,66 @@ func TestInitFlagsSingleAccount(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("loaded spec = %#v, want %#v", got, want)
 	}
+
+	if _, err := os.Stat(filepath.Join(dir, "live/main/dev/terragrunt.stack.hcl")); err != nil {
+		t.Errorf("init did not generate the project: %v", err)
+	}
+	for _, want := range []string{"created  root.hcl", "terragrunt stack run apply --backend-bootstrap"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("init output missing %q:\n%s", want, out)
+		}
+	}
 }
 
-func TestInitFlagsMultiAccount(t *testing.T) {
-	out, err := runInit(t,
+func TestInitRejectsMultiAccountBeforeWriting(t *testing.T) {
+	dir, _, err := runInit(t,
 		"--region", "us-east-1",
 		"--env", "dev",
-		"--env", "prod",
 		"--multi-account",
 		"--management-account", "mgmt",
 		"--vpc-cidr", "dev=10.0.0.0/16",
-		"--vpc-cidr", "prod=10.1.0.0/16",
-		"--nat", "dev=per_az",
 	)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "single-account") {
+		t.Fatalf("Execute error = %v, want one mentioning single-account", err)
 	}
-	got, err := spec.Load(out)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("spec.Load: %v", err)
+		t.Fatal(err)
 	}
+	if len(entries) != 0 {
+		t.Errorf("init left %d entries in the project directory, want none", len(entries))
+	}
+}
+
+func TestInitRefusesExistingSpec(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, spec.FileName)
+	if err := os.WriteFile(specPath, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := run(t, newInitCmd(), append(validInitFlags, dir)...)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("Execute error = %v, want one saying the spec already exists", err)
+	}
+	if got, _ := os.ReadFile(specPath); string(got) != "mine" {
+		t.Errorf("existing spec was overwritten with %q", got)
+	}
+}
+
+func TestInitFlagsMultiAccountAnswers(t *testing.T) {
+	f := initFlags{
+		region:            "us-east-1",
+		envs:              []string{"dev", "prod"},
+		multiAccount:      true,
+		managementAccount: "mgmt",
+		vpcCIDRs:          []string{"dev=10.0.0.0/16", "prod=10.1.0.0/16"},
+		natModes:          []string{"dev=per_az"},
+	}
+	a, err := f.answers()
+	if err != nil {
+		t.Fatalf("answers: %v", err)
+	}
+	got := a.toSpec()
 	want := spec.Spec{
 		Region: "us-east-1",
 		Accounts: spec.AccountsSpec{
@@ -115,14 +170,14 @@ func TestInitFlagErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := runInit(t, tt.args...)
+			dir, _, err := runInit(t, tt.args...)
 			if err == nil {
 				t.Fatalf("Execute: want error containing %q, got nil", tt.wantSub)
 			}
 			if !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("Execute error = %q, want it to contain %q", err.Error(), tt.wantSub)
 			}
-			if _, err := spec.Load(out); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, spec.FileName)); err == nil {
 				t.Error("a spec was written despite the error")
 			}
 		})

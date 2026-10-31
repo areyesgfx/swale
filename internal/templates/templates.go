@@ -22,6 +22,12 @@ var tmpl = template.Must(template.ParseFS(sources, "*.tmpl"))
 //go:embed networking_unit.hcl
 var NetworkingUnitHCL string
 
+// GitIgnore is the generated project's .gitignore. The source file has no
+// leading dot so git doesn't also apply it to this directory.
+//
+//go:embed gitignore
+var GitIgnore string
+
 // RootData is the input to root.hcl. Terragrunt creates StateBucket on
 // first use (ADR 0004), so it need not exist yet. Region applies to both
 // the state backend and the provider block. Tags are merged into
