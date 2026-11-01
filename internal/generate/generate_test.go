@@ -180,6 +180,43 @@ func TestRenderContainerizedApp(t *testing.T) {
 	}
 }
 
+func TestRenderDatabase(t *testing.T) {
+	s := webSpec()
+	s.App.Database = spec.DatabasePostgres
+	got := render(t, s)
+	for _, p := range []string{"units/database/terragrunt.hcl", "units/database/.terraform.lock.hcl", "modules/database/main.tf"} {
+		if _, ok := got[p]; !ok {
+			t.Errorf("missing %q", p)
+		}
+	}
+	for path, wants := range map[string][]string{
+		"live/stage/terragrunt.stack.hcl": {`unit "database"`, `instance_class        = "db.t4g.micro"`, "highly_available      = false", "deletion_protection   = false"},
+		"live/prod/terragrunt.stack.hcl":  {`instance_class        = "db.t4g.small"`, "highly_available      = true", "deletion_protection   = true", "backup_retention_days = 14"},
+		"units/service/terragrunt.hcl":    {`dependency "database"`, "database           = dependency.database.outputs"},
+		"README.md":                       {"PostgreSQL 17", "`DB_PASSWORD`", "increase `password_version`", "prod's database is protected from deletion"},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(got[path], want) {
+				t.Errorf("%s missing %q:\n%s", path, want, got[path])
+			}
+		}
+	}
+}
+
+func TestRenderWithoutDatabase(t *testing.T) {
+	got := render(t, webSpec())
+	for p := range got {
+		if strings.Contains(p, "database") {
+			t.Errorf("rendered %q for an app without a database", p)
+		}
+	}
+	for _, p := range []string{"units/service/terragrunt.hcl", "live/prod/terragrunt.stack.hcl", "README.md"} {
+		if strings.Contains(got[p], "database") || strings.Contains(got[p], "DB_") {
+			t.Errorf("%s mentions a database the app doesn't have", p)
+		}
+	}
+}
+
 func TestRenderWorker(t *testing.T) {
 	s := sampleSpec()
 	s.App = spec.App{Containerized: true, Kind: spec.AppKindWorker}

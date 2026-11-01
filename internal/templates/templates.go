@@ -16,15 +16,17 @@ var sources embed.FS
 
 var tmpl = template.Must(template.ParseFS(sources, "*.tmpl"))
 
-// NetworkingUnitHCL and ServiceUnitHCL are units/<name>/terragrunt.hcl.
+// NetworkingUnitHCL and DatabaseUnitHCL are units/<name>/terragrunt.hcl.
 // Nothing in them depends on a Spec (their paths are fixed by the
 // live/<env>/ layout), so they're embedded verbatim instead of rendered.
+// The service unit is rendered, since it depends on the database only
+// when the app has one.
 var (
 	//go:embed networking_unit.hcl
 	NetworkingUnitHCL string
 
-	//go:embed service_unit.hcl
-	ServiceUnitHCL string
+	//go:embed database_unit.hcl
+	DatabaseUnitHCL string
 )
 
 // ProviderLock is the .terraform.lock.hcl every unit gets, pinning the
@@ -56,7 +58,8 @@ type RootData struct {
 // EnvironmentData is the infrastructure swale derived for one environment,
 // e.g. Name "prod" and ResourceName "acme-api-prod". It's the input to
 // live/<env>/terragrunt.stack.hcl, and the README describes each one.
-// Service is nil when the app isn't containerized.
+// Service is nil when the app isn't containerized, and Database when it
+// has no database.
 type EnvironmentData struct {
 	Name         string
 	ResourceName string
@@ -64,6 +67,20 @@ type EnvironmentData struct {
 	NATMode      string
 	NATGateways  int
 	Service      *ServiceData
+	Database     *DatabaseData
+}
+
+// DatabaseData is the app's database settings in one environment.
+type DatabaseData struct {
+	InstanceClass       string
+	HighlyAvailable     bool
+	DeletionProtection  bool
+	BackupRetentionDays int
+}
+
+// ServiceUnitData is the input to units/service/terragrunt.hcl.
+type ServiceUnitData struct {
+	Database bool
 }
 
 // ServiceData is the containerized app's settings in one environment. Port
@@ -86,11 +103,13 @@ type ReadmeData struct {
 }
 
 // AppData is how the app runs, for the README. Kind is "" when the app
-// isn't containerized, and Port is 0 unless Kind is "web".
+// isn't containerized, Port is 0 unless Kind is "web", and Database is ""
+// for an app without one.
 type AppData struct {
 	Kind            string
 	Port            int
 	HealthCheckPath string
+	Database        string
 }
 
 func RenderRoot(data RootData) (string, error) {
@@ -99,6 +118,10 @@ func RenderRoot(data RootData) (string, error) {
 
 func RenderStack(data EnvironmentData) (string, error) {
 	return render("stack.hcl.tmpl", data)
+}
+
+func RenderServiceUnit(data ServiceUnitData) (string, error) {
+	return render("service_unit.hcl.tmpl", data)
 }
 
 func RenderReadme(data ReadmeData) (string, error) {

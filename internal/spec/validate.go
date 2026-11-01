@@ -61,13 +61,18 @@ func (s Spec) Validate() error {
 
 func (a App) validate() []error {
 	if !a.Containerized {
-		if a.Kind != "" || a.Port != 0 || a.HealthCheckPath != "" {
-			return []error{errors.New("app: kind, port and health_check_path only apply when containerized is true")}
+		if a.Kind != "" || a.Database != "" || a.Port != 0 || a.HealthCheckPath != "" {
+			return []error{errors.New("app: kind, database, port and health_check_path only apply when containerized is true")}
 		}
 		return nil
 	}
 
 	var errs []error
+	switch a.Database {
+	case "", DatabasePostgres:
+	default:
+		errs = append(errs, fmt.Errorf("app.database: %q is not supported (want %q, or leave it out)", a.Database, DatabasePostgres))
+	}
 	switch a.Kind {
 	case AppKindWeb:
 		if err := CheckPort(a.Port); err != nil {

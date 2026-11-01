@@ -28,13 +28,20 @@ type Spec struct {
 
 // App is how the app runs. Containerized apps run on ECS Fargate; an app
 // that isn't containerized gets only the network, and leaves the other
-// fields empty. Port and HealthCheckPath apply only to AppKindWeb.
+// fields empty. Port and HealthCheckPath apply only to AppKindWeb, and
+// Database is empty for an app without one.
 type App struct {
-	Containerized   bool    `yaml:"containerized"`
-	Kind            AppKind `yaml:"kind,omitempty"`
-	Port            int     `yaml:"port,omitempty"`
-	HealthCheckPath string  `yaml:"health_check_path,omitempty"`
+	Containerized   bool     `yaml:"containerized"`
+	Kind            AppKind  `yaml:"kind,omitempty"`
+	Database        Database `yaml:"database,omitempty"`
+	Port            int      `yaml:"port,omitempty"`
+	HealthCheckPath string   `yaml:"health_check_path,omitempty"`
 }
+
+// Database is the kind of database a containerized app gets, if any.
+type Database string
+
+const DatabasePostgres Database = "postgres"
 
 // AppKind is what a containerized app does: serve web requests behind a
 // load balancer, or work in the background with nothing able to reach it.

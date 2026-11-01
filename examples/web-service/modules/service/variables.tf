@@ -62,3 +62,15 @@ variable "desired_count" {
   description = "How many copies of the app to run. Two or more spread across availability zones, so one zone failing doesn't take the app down."
   default     = 1
 }
+
+variable "database" {
+  type = object({
+    address           = string
+    port              = number
+    name              = string
+    secret_arn        = string
+    security_group_id = string
+  })
+  description = "The database module's outputs, or null for an app without a database. The app gets the connection details as the DB_HOST, DB_PORT, DB_NAME, DB_USERNAME and DB_PASSWORD environment variables."
+  default     = null
+}
