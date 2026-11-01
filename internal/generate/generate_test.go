@@ -43,6 +43,7 @@ func TestRenderProducesExpectedTree(t *testing.T) {
 		"README.md",
 		"root.hcl",
 		"units/networking/terragrunt.hcl",
+		"units/networking/.terraform.lock.hcl",
 		"live/stage/terragrunt.stack.hcl",
 		"live/prod/terragrunt.stack.hcl",
 		"modules/networking/main.tf",
@@ -157,7 +158,7 @@ func webSpec() spec.Spec {
 
 func TestRenderContainerizedApp(t *testing.T) {
 	got := render(t, webSpec())
-	for _, p := range []string{"units/service/terragrunt.hcl", "modules/service/main.tf", "modules/service/variables.tf", "modules/service/outputs.tf", "modules/service/versions.tf"} {
+	for _, p := range []string{"units/service/terragrunt.hcl", "units/service/.terraform.lock.hcl", "modules/service/main.tf", "modules/service/variables.tf", "modules/service/outputs.tf", "modules/service/versions.tf"} {
 		if _, ok := got[p]; !ok {
 			t.Errorf("missing %q", p)
 		}
@@ -172,7 +173,7 @@ func TestRenderContainerizedApp(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"forwards them to your app on port 3000", "checks `/health`", "plain HTTP", "### Shipping your app", "--cluster acme-api-stage --service acme-api-stage", "Your app runs as 2 copies, spread across both zones."} {
+	for _, want := range []string{"forwards it to your app on port 3000", "checks `/health`", "serves your app over HTTPS", "### Shipping your app", "--cluster acme-api-stage --service acme-api-stage", "Your app runs as 2 copies, spread across both zones."} {
 		if !strings.Contains(got["README.md"], want) {
 			t.Errorf("README.md missing %q", want)
 		}
@@ -196,8 +197,10 @@ func TestRenderWorker(t *testing.T) {
 			t.Errorf("README.md missing %q", want)
 		}
 	}
-	if strings.Contains(readme, "load balancer serves") {
-		t.Error("worker README talks about a load balancer")
+	for _, unwanted := range []string{"load balancer", "CloudFront"} {
+		if strings.Contains(readme, unwanted) {
+			t.Errorf("worker README mentions %s, which workers don't get", unwanted)
+		}
 	}
 }
 
@@ -213,6 +216,21 @@ func TestRenderWithoutContainerOmitsService(t *testing.T) {
 	}
 	if !strings.Contains(got["README.md"], "## Adding your app later") {
 		t.Error("README.md doesn't explain how to add the app later")
+	}
+}
+
+// TestEveryUnitPinsItsProviders guards against a unit without a lock file,
+// which would let its provider version drift between runs.
+func TestEveryUnitPinsItsProviders(t *testing.T) {
+	got := render(t, webSpec())
+	for p := range got {
+		if !strings.HasSuffix(p, "/terragrunt.hcl") || !strings.HasPrefix(p, "units/") {
+			continue
+		}
+		lock := got[strings.TrimSuffix(p, "terragrunt.hcl")+".terraform.lock.hcl"]
+		if !strings.Contains(lock, `provider "registry.terraform.io/hashicorp/aws"`) {
+			t.Errorf("%s has no lock file pinning the AWS provider", p)
+		}
 	}
 }
 

@@ -70,6 +70,17 @@ When it is, set `containerized: true` under `app` in `swale.yaml`, along with `k
 Then delete each `live/<environment>/terragrunt.stack.hcl`, after copying out any changes you made, and run `swale generate`.
 swale never overwrites an existing file, so deleting them is how you let it write the new versions.
 
+## Upgrading providers
+
+Each `units/<name>/.terraform.lock.hcl` pins the exact Terraform provider builds, so every run on every machine uses the same ones.
+Terraform never updates these files by itself.
+To upgrade, regenerate one from its module, check that `plan` shows no surprises, and commit it:
+
+```sh
+terraform -chdir=modules/networking providers lock -platform=darwin_arm64 -platform=darwin_amd64 -platform=linux_amd64 -platform=linux_arm64 -platform=windows_amd64
+mv modules/networking/.terraform.lock.hcl units/networking/
+```
+
 ## Tearing an environment down
 
 ```sh

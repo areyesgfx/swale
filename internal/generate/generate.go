@@ -110,10 +110,10 @@ func Render(s spec.Spec) ([]File, error) {
 		{Path: ".gitignore", Content: templates.GitIgnore},
 		{Path: "README.md", Content: readme},
 		{Path: "root.hcl", Content: root},
-		{Path: "units/networking/terragrunt.hcl", Content: templates.NetworkingUnitHCL},
 	}
+	files = append(files, unit("networking", templates.NetworkingUnitHCL)...)
 	if s.App.Containerized {
-		files = append(files, File{Path: "units/service/terragrunt.hcl", Content: templates.ServiceUnitHCL})
+		files = append(files, unit("service", templates.ServiceUnitHCL)...)
 	}
 
 	for _, env := range envs {
@@ -137,6 +137,16 @@ func Render(s spec.Spec) ([]File, error) {
 		files = append(files, service...)
 	}
 	return files, nil
+}
+
+// unit returns the files of units/<name>/: its terragrunt.hcl and the
+// provider lock file that pins its module's providers.
+func unit(name, config string) []File {
+	dir := path.Join("units", name)
+	return []File{
+		{Path: path.Join(dir, "terragrunt.hcl"), Content: config},
+		{Path: path.Join(dir, ".terraform.lock.hcl"), Content: templates.ProviderLock},
+	}
 }
 
 // StackDir is the slash-separated directory, relative to the project root,

@@ -13,15 +13,9 @@ variable "vpc_id" {
   description = "VPC to run the app in."
 }
 
-variable "public_subnet_ids" {
-  type        = list(string)
-  description = "Subnets for the load balancer. Unused when port is null."
-  default     = []
-}
-
 variable "private_subnet_ids" {
   type        = list(string)
-  description = "Subnets the app's containers run in. Spread them across availability zones so a zone outage leaves containers running in the others."
+  description = "Subnets the app's containers and internal load balancer run in. Spread them across availability zones so a zone outage leaves containers running in the others."
 }
 
 variable "port" {

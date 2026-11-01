@@ -27,6 +27,16 @@ var (
 	ServiceUnitHCL string
 )
 
+// ProviderLock is the .terraform.lock.hcl every unit gets, pinning the
+// exact provider builds all modules use. It lives in the unit, not the
+// module, because that's the directory `terragrunt stack generate` copies
+// into .terragrunt-stack/, where Terraform reads it; a lock file Terraform
+// writes there itself is a gitignored build artifact and would be lost.
+// scripts/update-provider-lock.sh regenerates it.
+//
+//go:embed terraform.lock.hcl
+var ProviderLock string
+
 // GitIgnore is the generated project's .gitignore. The source file has no
 // leading dot so git doesn't also apply it to this directory.
 //
