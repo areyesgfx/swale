@@ -19,11 +19,11 @@ Each network has public subnets, which the internet can reach, and private subne
 Anything running in a private subnet can still reach out to the internet, for example to call an API, through a NAT gateway.
 
 Your app runs in containers on [AWS Fargate](https://aws.amazon.com/fargate/), so there are no servers to manage.
-In each environment, a load balancer in the public subnets takes requests on port 80 and forwards them to your app on port 8080.
-Your app's containers run in the private subnets and only accept traffic from the load balancer.
+In each environment, [CloudFront](https://aws.amazon.com/cloudfront/) serves your app over HTTPS at an address like `https://d1234abcd.cloudfront.net`, and redirects plain HTTP to HTTPS.
+It passes each request, privately, to a load balancer inside the network, which forwards it to your app on port 8080.
+Nothing but CloudFront can reach the load balancer, and nothing but the load balancer can reach your app's containers.
+CloudFront doesn't cache anything, so your app sees every request, and it adds standard security headers such as HSTS to every response.
 The load balancer checks `/health` on each container, stops sending requests to any that don't answer with a 2xx or 3xx status, and ECS replaces them.
-
-The load balancer serves plain HTTP for now, not HTTPS, so don't send passwords or other secrets to it yet.
 
 Each environment has its own container registry (Amazon ECR) for your app's images, and keeps your app's logs in CloudWatch Logs for 30 days.
 
@@ -35,7 +35,8 @@ AWS bills each one by the hour, plus a charge for every GB of traffic it handles
 In us-east-1 a NAT gateway is about $0.045 an hour, or around $33 a month before traffic.
 Your app's containers are billed while they run: with the defaults, 0.25 vCPU and 0.5 GB of memory each, that's about $9 a month per copy in us-east-1.
 Each load balancer is about $16 a month in us-east-1, plus a charge that grows with traffic.
-Prices vary by region and change over time, so check [Amazon VPC pricing](https://aws.amazon.com/vpc/pricing/), [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) and [Elastic Load Balancing pricing](https://aws.amazon.com/elasticloadbalancing/pricing/) for `us-east-1`.
+CloudFront's free tier covers 1 TB of traffic and 10 million requests a month across the account; beyond that it charges per GB and per request.
+Prices vary by region and change over time, so check [Amazon VPC pricing](https://aws.amazon.com/vpc/pricing/), [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/), [Elastic Load Balancing pricing](https://aws.amazon.com/elasticloadbalancing/pricing/) and [CloudFront pricing](https://aws.amazon.com/cloudfront/pricing/) for `us-east-1`.
 To stop paying for an environment, tear it down (see below).
 
 ## Before you deploy
@@ -61,6 +62,7 @@ terragrunt stack run apply
 `plan` shows what will be created, without changing anything.
 `--backend-bootstrap` makes it first create the S3 bucket that stores Terraform state, `acme-api-tfstate-0a1b2c3d`; you only need it the first time.
 `apply` creates everything, after asking you to confirm.
+The first `apply` in an environment takes 10 to 20 minutes, mostly waiting for CloudFront to deploy worldwide.
 
 Then do the same for the other environments, in this order:
 

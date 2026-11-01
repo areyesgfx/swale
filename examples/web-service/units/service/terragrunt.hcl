@@ -22,8 +22,7 @@ dependency "networking" {
   # network and uses its real outputs.
   mock_outputs = {
     vpc_id             = "vpc-00000000000000000"
-    public_subnet_ids  = ["subnet-00000000000000000", "subnet-00000000000000001"]
-    private_subnet_ids = ["subnet-00000000000000002", "subnet-00000000000000003"]
+    private_subnet_ids = ["subnet-00000000000000000", "subnet-00000000000000001"]
   }
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
@@ -31,7 +30,6 @@ dependency "networking" {
 inputs = {
   name               = values.name
   vpc_id             = dependency.networking.outputs.vpc_id
-  public_subnet_ids  = dependency.networking.outputs.public_subnet_ids
   private_subnet_ids = dependency.networking.outputs.private_subnet_ids
   image_tag          = values.image_tag
   desired_count      = values.desired_count

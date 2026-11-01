@@ -173,7 +173,7 @@ func TestRenderContainerizedApp(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"forwards them to your app on port 3000", "checks `/health`", "plain HTTP", "### Shipping your app", "--cluster acme-api-stage --service acme-api-stage", "Your app runs as 2 copies, spread across both zones."} {
+	for _, want := range []string{"forwards it to your app on port 3000", "checks `/health`", "serves your app over HTTPS", "### Shipping your app", "--cluster acme-api-stage --service acme-api-stage", "Your app runs as 2 copies, spread across both zones."} {
 		if !strings.Contains(got["README.md"], want) {
 			t.Errorf("README.md missing %q", want)
 		}
@@ -197,8 +197,10 @@ func TestRenderWorker(t *testing.T) {
 			t.Errorf("README.md missing %q", want)
 		}
 	}
-	if strings.Contains(readme, "load balancer serves") {
-		t.Error("worker README talks about a load balancer")
+	for _, unwanted := range []string{"load balancer", "CloudFront"} {
+		if strings.Contains(readme, unwanted) {
+			t.Errorf("worker README mentions %s, which workers don't get", unwanted)
+		}
 	}
 }
 

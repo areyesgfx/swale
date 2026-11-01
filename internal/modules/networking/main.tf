@@ -1,5 +1,9 @@
+# The excluded zones are the few where CloudFront VPC origins, which the
+# service module uses to reach its internal load balancer, aren't
+# supported: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html#vpc-origins-supported-regions
 data "aws_availability_zones" "available" {
-  state = "available"
+  state            = "available"
+  exclude_zone_ids = ["use1-az3", "usw1-az2", "apne1-az3", "cac1-az3"]
 }
 
 data "aws_region" "current" {}

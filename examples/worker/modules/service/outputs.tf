@@ -5,7 +5,7 @@ output "repository_url" {
 
 output "url" {
   description = "Where the app is reachable, or null for a background worker."
-  value       = local.web ? "http://${aws_lb.this[0].dns_name}" : null
+  value       = local.web ? "https://${aws_cloudfront_distribution.this[0].domain_name}" : null
 }
 
 output "cluster_name" {
